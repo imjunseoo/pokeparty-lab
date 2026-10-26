@@ -5,7 +5,7 @@ import { sprite } from './components.js';
 import { NATURES, TYPE_ITEMS, MODELED_ITEMS } from '../core/build.js';
 import { STAT_LABELS } from '../core/engine.js';
 import { itemName, itemSource, itemPartyWarning } from './reasons.js';
-import { orderedSets } from './sets.js';
+import { orderedSets, relearnMark, relearnToggle } from './sets.js';
 import { describeSet, refSource, setNameKo, moveGroup } from './setdesc.js';
 import { searchSelect, defineOptions, setSearchValue } from './searchselect.js';
 
@@ -47,10 +47,10 @@ export function analyzeMember(m, pm) {
 }
 
 const line = (label, vals) => (vals ? `<div class="set-line"><span>${label}</span><span class="vals">${vals}</span></div>` : '');
-/** 기술 칩. sub: 대신하는 원래 기술 이름이 있으면 "대체" 표시 */
-const moveChip = (slug, sub = null) => {
+/** 기술 칩. sub: 대신하는 원래 기술 이름이 있으면 "대체" 표시, re: 기술 떠올리기 전용 기술 Set 이면 「떠올리기」 표시 */
+const moveChip = (slug, sub = null, re = null) => {
   const mv = store.moves?.bySlug.get(slug);
-  const mark = sub ? `<span class="sub-mark" title="못 배우는 ${esc(sub)} 대신">대체</span>` : '';
+  const mark = (sub ? `<span class="sub-mark" title="못 배우는 ${esc(sub)} 대신">대체</span>` : '') + (re?.has(slug) ? relearnMark() : '');
   return mv ? `<span${sub ? ' class="is-sub"' : ''}><span class="dot t-${mv.type}" title="${esc(store.engine.typeKo(mv.type))}"></span>${esc(mv.ko)}<span class="cls">${CLS[mv.cat]}</span>${mark}</span>` : `<span>${esc(slug)}</span>`;
 };
 const moveKo = slug => store.moves?.bySlug.get(slug)?.ko || store.sets?.moves[slug]?.[0] || slug;
@@ -67,13 +67,17 @@ const ivText = iv => {
 /**
  * 세팅 한 덩어리 (기술·도구·특성·성격·개체값).
  * rows: 추천 세팅의 원래 기술 순서 [{ orig, use }] → 못 배우는 기술은 "원래(취소선) → 대체", itemSub: [원래 도구, 대체 도구]
+ * re: { only: 기술 떠올리기 전용 기술 Set, on } → 「떠올리기」 표시 + ON/OFF 버튼 (목표 세팅에만)
  */
-function setLines(set, ab, { rows = null, itemSub = null } = {}) {
+function setLines(set, ab, { rows = null, itemSub = null, re = null } = {}) {
   const struck = (text, why) => `<span class="na" title="${why}">${esc(text)}</span>`;
-  const moves = rows
-    ? rows.map(r => (r.use === r.orig ? moveChip(r.use)
-      : `<span class="sub-pair">${struck(moveKo(r.orig), '이 게임에서 못 배우는 기술')}<span class="sub-arrow">→</span>${r.use ? moveChip(r.use, moveKo(r.orig)) : '<span class="faint">대체 없음</span>'}</span>`)).join('')
-    : set.mv.length ? set.mv.map(s => moveChip(s)).join('') : '<span class="faint">입력 안 함</span>';
+  const only = re?.only || null;
+  const why = slug => (only?.has(slug) && !re.on ? '기술 떠올리기로만 배우는 기술 (기술 떠올리기 꺼 둠)' : '이 게임에서 못 배우는 기술');
+  const moves = (rows
+    ? rows.map(r => (r.use === r.orig ? moveChip(r.use, null, only)
+      : `<span class="sub-pair">${struck(moveKo(r.orig), why(r.orig))}<span class="sub-arrow">→</span>${r.use ? moveChip(r.use, moveKo(r.orig), only) : '<span class="faint">대체 없음</span>'}</span>`)).join('')
+    : set.mv.length ? set.mv.map(s => moveChip(s, null, only)).join('') : '<span class="faint">입력 안 함</span>')
+    + (re ? relearnToggle(re.on) : '');
   const item = itemSub && itemSub[1] === set.it
     ? `<span class="sub-pair">${struck(itemName(itemSub[0]), '이 게임에서 못 구하는 도구')}<span class="sub-arrow">→</span><span class="is-sub">${esc(itemName(set.it))}<span class="sub-mark">대체</span></span></span>`
     : set.it ? esc(itemName(set.it)) : '<span class="faint">없음</span>';
@@ -297,7 +301,8 @@ function editorHtml(i, m, pm) {
   const { engine } = store;
   const b = getBuilder();
   const set = currentSet(m, pm);
-  const learn = b.learnable(pm.mon, set);
+  const learn = b.learnable(pm.mon, set, { all: true });
+  const reOnly = b.relearnOnly(pm.mon);
   const byType = new Map();
   for (const mv of [...learn].sort((x, y) => (y.cat > 0) - (x.cat > 0) || y.power - x.power || x.ko.localeCompare(y.ko, 'ko'))) {
     const key = mv.cat ? mv.type : 'status';
@@ -307,8 +312,8 @@ function editorHtml(i, m, pm) {
   const moveList = `mv:${pm.mon.id}`;
   defineOptions(moveList, [...byType].sort((a, b2) => (a[0] === 'status') - (b2[0] === 'status')).flatMap(([, list]) => list).map(mv => ({
     value: mv.slug, label: mv.ko,
-    sub: `${engine.typeKo(mv.type)} · ${CLS[mv.cat]}${mv.cat ? ` ${mv.power || '—'}` : ''}${mv.acc && mv.acc < 100 ? ` · 명중 ${mv.acc}` : ''}`,
-    keys: `${engine.typeKo(mv.type)} ${CLS[mv.cat]} ${mv.slug}`,
+    sub: `${engine.typeKo(mv.type)} · ${CLS[mv.cat]}${mv.cat ? ` ${mv.power || '—'}` : ''}${mv.acc && mv.acc < 100 ? ` · 명중 ${mv.acc}` : ''}${reOnly.has(mv.slug) ? ' · 떠올리기' : ''}`,
+    keys: `${engine.typeKo(mv.type)} ${CLS[mv.cat]} ${mv.slug}${reOnly.has(mv.slug) ? ' 떠올리기' : ''}`,
   })));
   const moveSelect = k => `<label>기술 ${k + 1}${searchSelect({ name: `mv${k}`, list: moveList, value: set.mv[k] || '', placeholder: '기술 이름·초성·타입', label: `기술 ${k + 1}` })}</label>`;
   const allowed = allowedItems() || new Set();
@@ -341,7 +346,7 @@ function editorHtml(i, m, pm) {
     <fieldset class="se-iv"><legend>개체값 31 (트레이닝 칸·금색병뚜껑·우수 개체 ★)</legend>
       ${STAT_LABELS.map((label, k) => `<label class="check"><input type="checkbox" name="iv${k}" ${set.iv[k] ? 'checked' : ''}> ${label}</label>`).join('')}
     </fieldset>
-    <p class="note">기술 목록은 이 게임에서 ${esc(josa(pm.mon.ko, '이가'))} 기술 칸에서 배울 수 있는 기술이에요.</p>
+    <p class="note">기술 목록은 이 게임에서 ${esc(josa(pm.mon.ko, '이가'))} 배울 수 있는 기술 전부예요 (「떠올리기」는 레벨업이 아니라 기술 칸·학습장치의 기술 떠올리기로 배우는 교배·가르침·기술머신 기술).</p>
     <div class="se-actions">
       <button class="btn" type="submit">저장</button>
       <button class="btn ghost" type="button" data-act="set-fill" data-i="${i}">고른 세팅으로 채우기</button>
@@ -387,13 +392,13 @@ export function selectedTarget(i, m, pm) {
 }
 
 /** 참고 세팅마다 대체한 기술·도구 한눈에 (못 배움·못 구함 → 대체). 줄을 누르면 그 세팅으로 */
-function subSummary(i, list) {
-  const pair = (from, to) => `<span class="sub-pair"><span class="na">${esc(from)}</span><span class="sub-arrow">→</span><b>${esc(to)}</b></span>`;
+function subSummary(i, list, re = null) {
+  const pair = (from, to, mark = '') => `<span class="sub-pair"><span class="na">${esc(from)}</span><span class="sub-arrow">→</span><b>${esc(to)}</b>${mark}</span>`;
   return `<div class="sub-summary">
     <p class="note"><b>참고 세팅 대체 추천</b> 이 게임에서 못 배우는 기술·못 구하는 도구 대신 쓸 것 (누르면 그 세팅으로)</p>
     ${list.map(o => `<button type="button" class="sub-row" data-pick-set="${i}:${o.key}">
       <span class="sub-src">${esc(o.chip)}</span>
-      ${[...o.subs.map(([from, to]) => pair(moveKo(from), moveKo(to))), o.itemSub && pair(itemName(o.itemSub[0]), itemName(o.itemSub[1]))].filter(Boolean).join('')}
+      ${[...o.subs.map(([from, to]) => pair(moveKo(from), moveKo(to), re?.has(to) ? relearnMark() : '')), o.itemSub && pair(itemName(o.itemSub[0]), itemName(o.itemSub[1]))].filter(Boolean).join('')}
     </button>`).join('')}
   </div>`;
 }
@@ -425,9 +430,12 @@ export function buildCard(i, m, pm, { editing = false, recommended = '' } = {}) 
   const swapped = subCount(sel);
   const lost = [...sel.dropped.map(moveKo), sel.itemMissing && itemName(sel.itemMissing)].filter(Boolean);
   const anySubs = opts.some(o => subCount(o));
+  // 기술 떠올리기(교배·가르침·기술머신) 전용 기술 (내 세팅에 이미 있는 기술은 배운 것이라 빼고)
+  const reOnly = new Set([...b.relearnOnly(pm.mon)].filter(x => !r.cur.mv.includes(x)));
+  const reUsed = sel.set.mv.some(x => reOnly.has(x));
   const tabs = opts.length > 1 ? `<div class="set-tabs" role="tablist" aria-label="세팅 고르기">${opts.map(o => `
       <button type="button" role="tab" class="set-tab ${o === sel ? 'on' : ''}" aria-selected="${o === sel}" data-pick-set="${i}:${o.key}">${esc(o.chip)}${subCount(o) ? `<span class="tab-sub">대체 ${subCount(o)}</span>` : ''}</button>`).join('')}</div>
-    ${sel.key === 'best' && anySubs ? subSummary(i, opts.filter(o => subCount(o))) : ''}` : '';
+    ${sel.key === 'best' && anySubs ? subSummary(i, opts.filter(o => subCount(o)), reOnly) : ''}` : '';
   const target = m.set && !editing ? todoHtml({
     title: sel.key === 'best' ? '최선 세팅' : sel.title,
     steps: sel.key === 'best' ? r.steps : b.plan(pm.mon, r.cur, sel.set), now: r.now, top: ev,
@@ -440,7 +448,8 @@ export function buildCard(i, m, pm, { editing = false, recommended = '' } = {}) 
     <div class="build-block best">
       <div class="set-src"><b>${esc(sel.title)}</b><span>${esc(sel.src)}</span></div>
       <p class="set-why"><b>${esc(desc.role)}</b> ${esc(desc.line)}<span class="faint"> · 이 맵 상대에게 화력 ${Math.round(ev.offense)}% · 선공 ${Math.round(ev.speed * 100)}%</span></p>
-      ${setLines(sel.set, sel.set.ab, { rows: sel.rows, itemSub: sel.itemSub })}${metrics(ev, sel.set)}
+      ${setLines(sel.set, sel.set.ab, { rows: sel.rows, itemSub: sel.itemSub, re: { only: reOnly, on: b.relearn } })}${metrics(ev, sel.set)}
+      ${reUsed ? '<p class="note re-note"><b>떠올리기</b> 레벨업으로는 못 배우고 기술 칸·학습장치의 「기술 떠올리기」로 배우는 기술(교배·가르침·기술머신)이에요. 기술 떠올리기를 끄면 레벨업 기술만으로 추천해요.</p>' : ''}
       ${swapped ? '<p class="note sub-note"><b>대체 추천</b> 취소선은 이 게임에서 못 배우거나 못 구하는 것, 화살표 뒤가 같은 역할로 대신 쓸 기술·도구예요 (점수도 대체한 세팅 기준).</p>' : ''}
       ${lost.length ? `<p class="note na-note">대신할 것도 없어서 뺀 것: ${esc(lost.join(', '))}</p>` : ''}
     </div>

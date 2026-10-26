@@ -68,11 +68,20 @@ const FX_MULT = { recharge: 0.6, selfko: 0.35, cond: 0.3, first: 0.25, drop: 0.8
 // 데미지 밖의 쓸모가 있는 공격기
 const ATTACK_BONUS = { 'u-turn': 1.5, 'volt-switch': 1.5, 'flip-turn': 1.5, 'knock-off': 1.5, 'rapid-spin': 1, 'fake-out': 1 };
 
-/** moves.json → { list, bySlug, learn(id) } */
+/**
+ * moves.json → { list, bySlug, learn(id), relearn(id) }
+ * relearn(id): 레벨업으로는 못 배우고 기술 칸·학습장치의 「기술 떠올리기」로만 배우는 기술 slug (습득표에 -(번호 + 1)로 표시)
+ */
 export function createMoveBook(json) {
   const list = json.list.map(([slug, ko, type, cat, power, acc, prio, flags, hits, fx], i) => ({ i, slug, ko, type, cat, power, acc, prio, flags, hits, fx }));
   const bySlug = new Map(list.map(m => [m.slug, m]));
-  return { list, bySlug, learn: id => (json.learn[id] || []).map(i => list[i]) };
+  const rows = id => json.learn[id] || [];
+  const reCache = new Map();
+  const relearn = id => {
+    if (!reCache.has(id)) reCache.set(id, new Set(rows(id).filter(i => i < 0).map(i => list[-i - 1].slug)));
+    return reCache.get(id);
+  };
+  return { list, bySlug, learn: id => rows(id).map(i => list[i < 0 ? -i - 1 : i]), relearn };
 }
 
 /** Lv·개체값(31이면 true)·성격으로 실제 능력치 [H, A, B, C, D, S] (노력치 0) */
@@ -93,7 +102,8 @@ export function statsAt(base, level, iv = [], nature = null) {
  * opts.level: 기본 레벨 (게임 마지막 Lv.75), opts.battle: 'single' | 'double', opts.sets: sets.json (추천 세팅 = 사전 지식)
  * opts.items: 이 룰에서 구할 수 있는 도구 Set (없으면 도구는 계산에서 고르지 않음)
  */
-export function createBuilder(ctx, book, { level = 75, battle = 'single', sets = null, items = null } = {}) {
+// relearn: 기술 떠올리기(교배·가르침·기술머신) 기술까지 쓸지. false 면 레벨업 기술만으로 최선 세팅·대체 기술을 고른다
+export function createBuilder(ctx, book, { level = 75, battle = 'single', sets = null, items = null, relearn = true } = {}) {
   const { engine } = ctx;
   const { tIdx } = engine;
   const double = battle === 'double';
@@ -295,14 +305,25 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
     return { score: mp.offense - p.takenW * fixed.taken + SPEED_W * fixed.speed + extra, offense: mp.offense, taken: fixed.taken, speed: fixed.speed, extra, stats: p.st };
   }
 
-  /** 배울 수 있는 기술 (메가진화 폼은 기본 폼 습득표, 습득표가 없으면 추천 세팅·지금 기술) */
-  function learnable(mon, set = {}) {
-    let list = book.learn(mon.id);
-    if (!list.length && mon.mega) {
-      const base = engine.dex.pokemon.find(p => p.sp === mon.sp && !p.mega && book.learn(p.id).length);
-      if (base) list = book.learn(base.id);
+  /** 습득표가 있는 폼 id (메가진화 폼은 기본 폼) */
+  function learnId(mon) {
+    if (book.learn(mon.id).length || !mon.mega) return mon.id;
+    return engine.dex.pokemon.find(p => p.sp === mon.sp && !p.mega && book.learn(p.id).length)?.id ?? mon.id;
+  }
+  /** 기술 떠올리기로만 배우는 기술 slug Set */
+  const relearnOnly = mon => book.relearn?.(learnId(mon)) || new Set();
+
+  /**
+   * 배울 수 있는 기술 (습득표가 없으면 추천 세팅·지금 기술).
+   * 기술 떠올리기를 끄면 레벨업 기술만 (all: true 면 끈 것과 상관없이 전부 — 내 세팅 입력용)
+   */
+  function learnable(mon, set = {}, { all = false } = {}) {
+    const list = book.learn(learnId(mon));
+    if (list.length) {
+      if (relearn || all) return list;
+      const re = relearnOnly(mon);
+      return list.filter(m => !re.has(m.slug));
     }
-    if (list.length) return list;
     const extra = [...prior(mon).mv.keys(), ...(set.mv || [])].map(s => book.bySlug.get(s)).filter(Boolean);
     return [...new Set(extra)];
   }
@@ -435,5 +456,5 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
     return steps.filter(s => s.gain > 0.05).sort((a, b) => b.gain - a.gain);
   }
 
-  return { evaluate, optimize, plan, learnable, profile, statsAt: (mon, set) => profile(mon, set).st, level };
+  return { evaluate, optimize, plan, learnable, relearnOnly, relearn, profile, statsAt: (mon, set) => profile(mon, set).st, level };
 }

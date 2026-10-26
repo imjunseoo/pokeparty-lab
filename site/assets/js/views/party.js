@@ -3,7 +3,7 @@
 // 예시를 고르면 바로 다음 추천을 다시 계산한다.
 import {
   store, update, getContext, partyMembers, addToParty, encodeParty, usageInfo,
-  isGameMode, gameRule, battleMode, whereToFind, setsOrder, gameOpts, evoOptions, megaOptions, loadMoves, sanitizeSet,
+  isGameMode, gameRule, battleMode, whereToFind, setsOrder, gameOpts, evoOptions, megaOptions, loadMoves, sanitizeSet, toggleRelearn, relearnToast,
 } from '../state.js';
 import { createPicker } from '../ui/picker.js';
 import { esc, on, toast, copyText, josa } from '../ui/dom.js';
@@ -123,6 +123,7 @@ export function initParty(el) {
     if (t) fillEditor(el.closest('form'), t.set);
     toast(`${t?.title || '세팅'}을 채웠어요 · 실제와 다르면 고친 뒤 저장하세요`);
   });
+  on(root, 'click', '[data-act="relearn-toggle"]', () => toast(relearnToast(toggleRelearn())));
   // 멤버 카드의 세팅 버튼 (최선 ↔ 참고 추천 세팅)
   on(root, 'click', '[data-pick-set]', (e, el) => {
     const [i, key] = el.dataset.pickSet.split(':');

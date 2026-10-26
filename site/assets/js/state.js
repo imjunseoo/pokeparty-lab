@@ -19,7 +19,8 @@ export const store = {
   moves: null,      // 게임 기술 표 + 습득표 (moves.json, 내 세팅을 쓸 때만 로드) → createMoveBook
   mode: TYPE_MODE,
   filters: { game: 'all', legend: false, mega: false, minBst: 450, usageMega: true },
-  game: { map: 'tour', rule: 'normal', battle: 'single', legends: false },
+  // relearn: 기술 떠올리기(기술 칸·학습장치의 교배·가르침·기술머신 기술)까지 추천·대체에 쓸지
+  game: { map: 'tour', rule: 'normal', battle: 'single', legends: false, relearn: true },
   party: [],        // [{ id, ability, tera, picked, evo(진화 목표 id), mega(메가진화 폼 id), set(내 세팅) }]
   opponents: [],    // 선봉 추천용 상대 파티 [id]
   wild: [],         // 포획 추천: 야생 칸에서 나온 후보 [id] (최대 3)
@@ -88,7 +89,18 @@ export const battleMode = () => (isGameMode() ? store.game.battle : store.mode =
 /** 추천 세팅 우선순위 키 (ui/sets.js ORDER) */
 export const setsOrder = () => (isGameMode() ? `game-${store.game.battle}` : store.mode);
 /** 세팅 카드에 넘길 게임 정보 (게임 모드가 아니면 null) */
-export const gameOpts = () => (isGameMode() ? { data: store.gameData, rule: gameRule() } : null);
+/** 기술 떠올리기 ON/OFF (모든 추천 세팅 카드 공통) → 바뀐 값 */
+export function toggleRelearn() {
+  update(s => { s.game.relearn = s.game.relearn === false; });
+  return store.game.relearn;
+}
+export const relearnToast = on => (on ? '기술 떠올리기 ON · 교배·가르침·기술머신 기술까지 추천·대체에 써요' : '기술 떠올리기 OFF · 레벨업 기술만으로 추천·대체해요');
+
+/** 추천 세팅 카드용 게임 정보. relearn: { on, of(mon) → 기술 떠올리기로만 배우는 기술 Set | null (기술 데이터 전) } */
+export const gameOpts = () => (isGameMode() ? {
+  data: store.gameData, rule: gameRule(),
+  relearn: { on: store.game.relearn !== false, of: mon => getBuilder()?.relearnOnly(mon) || null },
+} : null);
 
 export async function loadUsage() {
   const info = usageInfo();
@@ -137,10 +149,11 @@ let builderCache = null, builderKey = '';
 export function getBuilder() {
   if (!isGameMode() || !store.moves) return null;
   const ctx = getContext();
-  const key = `${ctxKey}|${store.game.battle}|${gameRule()?.key}|${!!store.sets}`;
+  const key = `${ctxKey}|${store.game.battle}|${gameRule()?.key}|${!!store.sets}|${store.game.relearn !== false}`;
   if (key !== builderKey || !builderCache) {
     builderCache = createBuilder(ctx, store.moves, {
       level: store.gameData.finalLevel, battle: store.game.battle, sets: store.sets, items: allowedItems(),
+      relearn: store.game.relearn !== false,
     });
     builderKey = key;
   }

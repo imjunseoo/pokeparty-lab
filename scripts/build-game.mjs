@@ -231,13 +231,18 @@ function build({ dat, dex, sets, T }) {
   const levelTable = (block(lvSrc, 'LEVEL_TABLE').replace(/#.*$/gm, '').match(/\d+/g) || []).map(Number);
 
   // ── 기술 습득: 추천 세팅의 기술 중 게임에서 배울 수 없는 것 표시 ──
-  const learn = new Map();   // dex id → Set(move id)
+  // 레벨업 기술은 레벨이 오르면 배우고(Board_Turn), 교배기술·가르침(기술머신) 기술은 기술 칸·학습장치의
+  // 「기술 떠올리기」로만 배운다 (Board_Skill_Tile: SKILL_TILE_MOVE_SCOPE = 2 → 레벨업 + 기술머신 + 가르침 + 교배 전부)
+  const learn = new Map();     // dex id → Set(move id) 전부
+  const lvLearn = new Map();   // dex id → Set(move id) 레벨업 기술만
   for (const [k, g] of gameMon) {
     const s = g.data;
     const set = learn.get(g.dex.id) || new Set();
-    for (const [, mv] of s.moves || []) set.add(toId(String(mv)));
+    const lv = lvLearn.get(g.dex.id) || new Set();
+    for (const [, mv] of s.moves || []) { set.add(toId(String(mv))); lv.add(toId(String(mv))); }
     for (const mv of [...(s.tutor_moves || []), ...(s.egg_moves || [])]) set.add(toId(String(mv)));
     learn.set(g.dex.id, set);
+    lvLearn.set(g.dex.id, lv);
   }
   // 진화 전 단계의 기술(알 기술 등)도 물려받음
   const prevOf = new Map();
@@ -246,18 +251,25 @@ function build({ dat, dex, sets, T }) {
     const t = gameMon.get(String(e[0]));
     if (t) (prevOf.get(t.dex.id) || prevOf.set(t.dex.id, new Set()).get(t.dex.id)).add(g.dex.id);
   }
-  const fullLearn = id => {
-    const out = new Set(learn.get(id) || []);
+  const withPrevos = table => id => {
+    const out = new Set(table.get(id) || []);
     const seen = new Set([id]);
     const stack = [...(prevOf.get(id) || [])];
     while (stack.length) {
       const pid = stack.pop();
       if (seen.has(pid)) continue;
       seen.add(pid);
-      for (const m of learn.get(pid) || []) out.add(m);
+      for (const m of table.get(pid) || []) out.add(m);
       for (const q of prevOf.get(pid) || []) stack.push(q);
     }
     return out;
+  };
+  const fullLearn = withPrevos(learn);
+  const levelLearn = withPrevos(lvLearn);
+  // 기술 떠올리기(기술 칸·학습장치)로만 배우는 기술 = 전부 − 레벨업 기술
+  const relearnOnly = id => {
+    const lv = levelLearn(id);
+    return new Set([...fullLearn(id)].filter(m => !lv.has(m)));
   };
   const illegal = {};
   for (const id of Object.keys(pool).map(Number)) {
@@ -279,10 +291,10 @@ function build({ dat, dex, sets, T }) {
     moves: dat('moves.dat'), toId,
     slugOf: key => moveSlug.get(toId(key)) || toId(key),
     nameOf: (slug, en) => [msg[5].get(en), moveKoApi.get(slug)].find(s => s && hasHangul(s)) || en,
-    learnOf: fullLearn, ids: [...new Set([...gameMon.values()].map(g => g.dex.id))],
+    learnOf: fullLearn, relearnOf: relearnOnly, ids: [...new Set([...gameMon.values()].map(g => g.dex.id))],
   });
   writeJson(join(DATA_DIR, 'game', 'moves.json'), moveData)
-    .then(size => console.log(`✔ game/moves.json · 기술 ${moveData.list.length}개 · 습득표 ${Object.keys(moveData.learn).length}종 · ${size}`));
+    .then(size => console.log(`✔ game/moves.json · 기술 ${moveData.list.length}개 · 습득표 ${Object.keys(moveData.learn).length}종 (기술 떠올리기 전용 ${Object.values(moveData.learn).flat().filter(i => i < 0).length}개) · ${size}`));
 
   // ── 메가진화: 기본 폼 dex id → [[메가 폼 dex id, 메가스톤]] (게임 상점의 메가스톤 기준) ──
   const megas = {};
