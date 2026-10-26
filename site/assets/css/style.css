@@ -150,8 +150,10 @@ h1, h2, h3 { line-height: 1.25; margin: 0; letter-spacing: -0.01em; }
 
 /* ───────── 레이아웃 ───────── */
 main { flex: 1; width: 100%; max-width: 1180px; margin: 0 auto; padding: 22px 16px 40px; outline: none; }
-.view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; animation: fade .25s ease; }
-@keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.view { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+main > .view { animation: fade .25s ease; }
+/* 투명도는 건드리지 않음: 백그라운드 탭에서 애니메이션이 멈춰도 화면이 흐려지지 않게 */
+@keyframes fade { from { transform: translateY(4px); } to { transform: none; } }
 .page-head h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.03em; }
 .page-head p { margin: 6px 0 0; color: var(--muted); }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px; min-width: 0; }
@@ -330,6 +332,9 @@ button.type { border: 0; cursor: pointer; }
 .options summary::after { content: '▾'; margin-left: auto; color: var(--faint); transition: transform .15s; }
 .options[open] summary::after { transform: rotate(180deg); }
 .options-body { padding: 4px 14px 14px; display: flex; flex-wrap: wrap; gap: 12px 22px; align-items: center; }
+/* 긴 옵션 글자(맵 설명 등) 때문에 선택 상자가 화면 밖으로 밀리지 않게 */
+.options-body .field { display: flex; flex: 1 1 240px; min-width: 0; max-width: 100%; }
+.options-body .field .select { flex: 1; min-width: 0; width: 100%; text-overflow: ellipsis; }
 .range { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; }
 .range input { accent-color: var(--accent); width: 140px; }
 
@@ -411,10 +416,98 @@ button.type { border: 0; cursor: pointer; }
 .set-card { border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: grid; gap: 8px; background: var(--surface-2); }
 .set-card header { display: flex; align-items: center; gap: 8px; font-weight: 800; }
 .set-card header img { width: 40px; height: 40px; }
-.set-line { font-size: 13px; display: grid; grid-template-columns: 54px minmax(0, 1fr); gap: 6px; }
+.set-src { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 12px; color: var(--faint); margin-top: -2px; }
+.set-src b { color: var(--text); font-size: 13.5px; }
+.more-sets { border-top: 1px dashed var(--border); padding-top: 8px; }
+.more-sets summary { cursor: pointer; font-size: 12.5px; font-weight: 700; color: var(--info); }
+.more-sets[open] summary { margin-bottom: 8px; }
+.more-sets .set-card { background: var(--surface); margin-top: 8px; }
+.set-line { font-size: 13px; display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 6px; }
 .set-line > span:first-child { color: var(--faint); font-weight: 700; }
 .set-line .vals { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .set-line .vals em { font-style: normal; color: var(--faint); font-size: 12px; margin-left: 2px; }
+
+/* 슬롯: 테라 선택이 없는 룰이면 특성 한 칸 */
+.slot-fields.one { grid-template-columns: minmax(0, 1fr); }
+
+/* 다음에 노릴 속성 추천 */
+.rec-card { border-color: var(--gold); box-shadow: 0 0 0 1px color-mix(in srgb, var(--gold) 55%, transparent), var(--shadow); }
+.card-head h3 svg { width: 18px; height: 18px; fill: #d4a000; flex-shrink: 0; }
+.rec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.rec-type { border: 1px solid var(--border); border-radius: 13px; padding: 12px; display: grid; gap: 9px; align-content: start; background: var(--surface-2); min-width: 0; }
+.rec-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rec-rank { font-weight: 900; font-size: 13px; color: var(--accent); }
+.rec-examples { display: grid; gap: 6px; }
+.rec-mon { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; text-align: left;
+  padding: 5px 8px 5px 4px; border-radius: 11px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; transition: border-color .15s, transform .1s; }
+.rec-mon:hover { border-color: var(--accent); transform: translateY(-1px); }
+.rec-mon img { width: 44px; height: 44px; }
+.rm-main { display: grid; gap: 2px; min-width: 0; }
+.rm-main b { font-size: 14px; }
+.rm-hint { font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rm-add { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.rm-add svg { width: 16px; height: 16px; fill: currentColor; }
+.link-btn { justify-self: start; border: 0; background: none; padding: 2px 0; color: var(--info); font-weight: 700; font-size: 12.5px; cursor: pointer; }
+.link-btn:hover { text-decoration: underline; }
+
+/* 게임에서 못 구하는 도구·못 배우는 기술 */
+.na { text-decoration: line-through; text-decoration-color: var(--danger); opacity: .7; }
+.na-note { color: var(--danger); }
+.mc-where { font-size: 11px; color: var(--faint); line-height: 1.3; }
+
+/* 상세 상성 분석 (접힘) */
+.deep summary { cursor: pointer; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; list-style: none; }
+.deep summary::-webkit-details-marker { display: none; }
+.deep summary h3 { font-size: 17px; font-weight: 800; }
+.deep summary .sub { font-size: 13px; color: var(--muted); }
+.deep summary::after { content: '펼치기 ▾'; margin-left: auto; font-size: 12.5px; color: var(--info); font-weight: 700; }
+.deep[open] summary::after { content: '접기 ▴'; }
+.deep-body { display: grid; gap: 22px; margin-top: 16px; }
+
+/* ───────── 선봉 추천 ───────── */
+.opp-list, .mine-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.opp { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 2px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); color: inherit; text-decoration: none; }
+.opp img { width: 40px; height: 40px; }
+.opp > span { display: grid; gap: 2px; font-size: 13px; }
+.opp button { border: 0; background: transparent; color: var(--faint); width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; cursor: pointer; }
+.opp button:hover { background: var(--surface-3); color: var(--text); }
+.opp button svg { width: 15px; height: 15px; fill: currentColor; }
+.paste { margin-top: 12px; }
+.paste summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--info); }
+.paste textarea { width: 100%; margin: 8px 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); font: inherit; font-size: 14px; resize: vertical; }
+.lead-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.lead-list li { display: grid; grid-template-columns: 30px minmax(150px, 1.1fr) minmax(80px, .8fr) minmax(0, 2fr); align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--surface-2); }
+.lead-list li.top { box-shadow: inset 0 0 0 2px var(--gold); }
+.lead-rank { font-weight: 900; color: var(--accent); font-size: 15px; text-align: center; }
+.lead-mon { display: inline-flex; align-items: center; gap: 6px; color: inherit; text-decoration: none; min-width: 0; }
+.lead-mon img { width: 48px; height: 48px; flex-shrink: 0; }
+.lead-mon > span { display: grid; gap: 3px; }
+.lead-score .track { display: block; height: 9px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.lead-score .track span { display: block; height: 100%; background: var(--good); border-radius: 99px; }
+.lead-pair { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border-radius: 12px; background: var(--good-soft); margin-bottom: 10px; }
+.lead-pair .plus { font-weight: 900; color: var(--muted); }
+@media (max-width: 700px) {
+  .lead-list li { grid-template-columns: 26px minmax(0, 1fr) 70px; }
+  .lead-list li .reasons { grid-column: 1 / -1; }
+}
+.threats { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.threat { border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; background: var(--danger-soft); display: grid; gap: 4px; }
+.threat p { margin: 0; font-size: 13px; }
+.threat .answer { color: var(--muted); }
+.vs-grid { border-collapse: separate; border-spacing: 3px; font-size: 12.5px; margin: 0 auto; }
+.vs-grid th { font-weight: 700; color: var(--muted); font-size: 11.5px; padding: 2px 4px; }
+.vs-grid thead th img, .vs-grid tbody th img { width: 38px; height: 38px; display: block; margin: 0 auto; }
+.vs-grid .th-name { display: block; max-width: 74px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 auto; text-align: center; }
+.vs-grid .rowhead { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+.vs-grid td { min-width: 82px; height: 40px; text-align: center; border-radius: 9px; background: var(--surface-2); position: relative; }
+.vs-grid td > span { display: inline-flex; align-items: center; gap: 3px; }
+.vs-grid td i { color: var(--faint); font-style: normal; }
+.vs-grid td em { position: absolute; top: 1px; right: 4px; font-style: normal; font-size: 11px; }
+.vs-grid td.good { background: var(--good-soft); box-shadow: inset 0 0 0 1px var(--good); }
+.vs-grid td.good-ish { background: var(--good-soft); }
+.vs-grid td.bad { background: var(--danger-soft); box-shadow: inset 0 0 0 1px var(--danger); }
+.vs-grid td.bad-ish { background: var(--danger-soft); }
+.vs-grid .mult { min-width: 28px; height: 22px; font-size: 12px; }
 
 /* ───────── 타입 상성표 ───────── */
 .chart-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }

@@ -5,9 +5,11 @@
   "type": "module",
   "description": "포켓몬 상성 탐색 & 실전 데이터 기반 파티 추천 웹 서비스",
   "scripts": {
-    "data": "node scripts/build-pokedex.mjs && node scripts/build-usage.mjs",
+    "data": "node scripts/build-pokedex.mjs && node scripts/build-usage.mjs && node scripts/build-sets.mjs",
     "data:pokedex": "node scripts/build-pokedex.mjs",
     "data:usage": "node scripts/build-usage.mjs",
+    "data:sets": "node scripts/build-sets.mjs",
+    "data:game": "node scripts/build-game.mjs",
     "dev": "node scripts/serve.mjs",
     "test": "node --test"
   },

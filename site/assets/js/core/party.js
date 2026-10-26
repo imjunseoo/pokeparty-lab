@@ -23,27 +23,49 @@ function typePenalty(net, weak, resist, size) {
  * 분석/추천에 필요한 사전 계산 묶음.
  * usage 가 있으면 실전 사용률 포켓몬만 후보로, 없으면 도감 전체에서 filters 로 후보를 고른다.
  */
-export function createContext(engine, { usage = null, filters = {} } = {}) {
+/**
+ * 「포켓몬 파티!」 게임에서 잡을 수 있는 포켓몬과 가중치.
+ * 투어 맵은 지역 출현표(가중치 = 출현 빈도), 나머지 맵은 최종진화 전체(타입·세대·색깔별 구역).
+ * legends: 미라클교환·레이드로만 얻는 전설·환상·UB·패러독스 포함 여부
+ */
+export function gamePool(engine, { data, map = 'tour', legends = false }) {
+  const weight = new Map();
+  if (map === 'tour') {
+    for (const area of data.areas) for (const [id, w] of area.mons) {
+      if (legends || !data.pool[id]?.l) weight.set(id, (weight.get(id) || 0) + w);
+    }
+  }
+  for (const [id, v] of Object.entries(data.pool)) {
+    if (map !== 'tour' ? legends || !v.l : legends && v.l) weight.set(+id, weight.get(+id) || 1);
+  }
+  return [...weight].map(([id, w]) => ({ mon: engine.byId.get(id), w })).filter(e => e.mon);
+}
+
+export function createContext(engine, { usage = null, filters = {}, game = null } = {}) {
   const { dex, types, tIdx } = engine;
   const umap = usage?.mons || {};
   const f = { game: 'all', legend: false, mega: !!usage, minBst: 450, ...filters };
-  const game = f.game !== 'all' ? dex.games[f.game] : null;
-  const gameSet = game ? new Set(game.species) : null;
+  const dexGame = f.game !== 'all' ? dex.games[f.game] : null;
+  const gameSet = dexGame ? new Set(dexGame.species) : null;
+  const gameEntries = game ? gamePool(engine, game) : null;
 
   let candidates;
-  if (usage) {
+  if (gameEntries) {
+    candidates = gameEntries.map(e => e.mon);
+  } else if (usage) {
     candidates = Object.keys(umap).map(id => engine.byId.get(+id)).filter(Boolean);
   } else {
     candidates = dex.pokemon.filter(p => p.final && !p.battle
       && (f.legend || (!p.legend && !p.myth))
       && engine.effectiveBst(p) >= f.minBst
-      && (!gameSet || (gameSet.has(p.sp) && !(p.mega && game.noMega))));
+      && (!gameSet || (gameSet.has(p.sp) && !(p.mega && dexGame.noMega))));
   }
-  if (!f.mega) candidates = candidates.filter(p => !p.mega);
+  if (!f.mega && !gameEntries) candidates = candidates.filter(p => !p.mega);
 
-  // 공격 커버리지를 재는 "메타" 포켓몬: 실전 사용률 가중치, 없으면 후보 전체 동일 가중
+  // 공격 커버리지를 재는 "메타" 포켓몬: 실전 사용률 / 게임 출현 빈도 가중치, 없으면 후보 전체 동일 가중
   const meta = usage
     ? Object.entries(umap).map(([id, u]) => ({ mon: engine.byId.get(+id), w: u.u, u })).filter(m => m.mon)
+    : gameEntries ? gameEntries.map(e => ({ mon: e.mon, w: e.w }))
     : candidates.map(mon => ({ mon, w: 1 }));
   const metaW = meta.reduce((a, m) => a + m.w, 0) || 1;
   // eff[a][q]: 공격 타입 a 가 메타 포켓몬 q 에 주는 배율 (q 의 대표 특성 반영)
@@ -67,7 +89,10 @@ export function createContext(engine, { usage = null, filters = {} } = {}) {
     raw.forEach((v, a) => { threat[a] = 0.5 + 0.5 * (v / mean); });
   }
 
-  const ctx = { engine, usage, umap, filters: f, meta, metaW, eff, threat };
+  const ctx = { engine, usage, umap, filters: f, game, meta, metaW, eff, threat };
+  // 게임이 원작과 다른 종족값을 쓰는 포켓몬 (예: 메가메타그로스)
+  const changed = game?.data.changed || {};
+  ctx.stats = mon => changed[mon.id]?.st || mon.st;
 
   ctx.prep = (mon, { ability, tera = null, locked = false } = {}) => {
     const u = umap[mon.id];
@@ -79,7 +104,7 @@ export function createContext(engine, { usage = null, filters = {} } = {}) {
       const row = eff[tIdx[s]];
       for (let q = 0; q < meta.length; q++) if (row[q] > off[q]) off[q] = row[q];
     }
-    const total = engine.effectiveBst(mon);
+    const total = engine.effectiveBst(mon) - engine.bst(mon) + ctx.stats(mon).reduce((a, b) => a + b, 0);
     const indiv = usage
       ? clamp((total - 500) / 100, -1, 1) * 0.25 + 0.55 * Math.log1p(u?.u || 0)
       : clamp((total - 500) / 100, -1.5, 1.2) * 0.9;
@@ -322,6 +347,95 @@ export function findCounters(ctx, target, { ability = null, tera = null } = {}, 
     const score = Math.log2(Math.max(off, 0.25)) * 1.6 - Math.log2(Math.max(def, 0.125)) * 1.1 + c.indiv * 0.4;
     return { c, off, offType, def, score };
   }).filter(r => r.off >= 2).sort((a, b) => b.score - a.score).slice(0, limit);
+}
+
+/**
+ * 다음에 노릴 "속성(타입)" 추천 + 타입별 예시 포켓몬.
+ * 원하는 포켓몬을 고를 수 없는 게임용: 후보 하나하나를 넣어 본 점수 상승폭을 타입별로 모아 순위를 매긴다.
+ * @returns [{ type, score, reasons, list: [{ c, gain }] (점수순) }]
+ */
+export function recommendTypes(ctx, members, { limit = 6 } = {}) {
+  const { engine } = ctx;
+  const { types, chart, tIdx } = engine;
+  const st = stateOf(ctx, members);
+  const base = totalScore(ctx, st);
+  const groups = new Map();
+  for (const c of ctx.pool) {
+    if (!allowed(st, c)) continue;
+    const gain = scoreWith(ctx, st, c) - base;
+    for (const t of c.mon.t) (groups.get(t) || groups.set(t, []).get(t)).push({ c, gain });
+  }
+  // 파티가 아직 못 받아내는(약점 우세) 공격 타입, 자속으로 효과 굉장을 못 주는 타입
+  const exposed = types.map((t, a) => ({ t, sev: st.weak[a] - st.resist[a] + (st.resist[a] === 0 && st.members.length >= 2 ? 0.5 : 0) }))
+    .filter(x => x.sev > 0).sort((a, b) => b.sev - a.sev);
+  const restBest = types.map((_, d) => Math.max(0, ...st.members.flatMap(m => m.stabs.map(s => chart[tIdx[s]][d]))));
+  return [...groups].map(([type, list]) => {
+    list.sort((a, b) => b.gain - a.gain);
+    const top = list.slice(0, 3);
+    const score = top.reduce((a, x) => a + x.gain, 0) / top.length;
+    const reasons = [];
+    for (const x of exposed) {
+      const m = engine.effectiveness(x.t, [type]);
+      if (m < 1) reasons.push({ kind: 'def', type: x.t, mult: m });
+    }
+    const gains = types.filter((_, d) => restBest[d] < 2 && chart[tIdx[type]][d] >= 2);
+    if (gains.length) reasons.push({ kind: 'off', types: gains });
+    const newWeak = types.filter((t, a) => engine.effectiveness(t, [type]) > 1 && st.weak[a] >= 2);
+    if (newWeak.length) reasons.push({ kind: 'warn-types', types: newWeak });
+    return { type, score, reasons: [...reasons.filter(r => r.kind === 'def').slice(0, 4), ...reasons.filter(r => r.kind !== 'def')], list };
+  }).sort((a, b) => b.score - a.score).slice(0, limit);
+}
+
+const matchVal = m => (m >= 4 ? 2 : m >= 2 ? 1 : m >= 1 ? 0 : m >= 0.5 ? -0.6 : m > 0 ? -1 : -1.5);
+
+/**
+ * 상대 파티를 보고 내 선봉 고르기.
+ * 각 포켓몬마다: 상대 전원에게 주는 자속 배율(공격) · 상대 자속에 받는 배율(방어) · 스피드 우위를 합산.
+ * double 이면 함께 내보낼 선봉 2마리 조합도 고른다.
+ */
+export function leadAnalysis(ctx, mine, foes, { double = false } = {}) {
+  const { engine } = ctx;
+  const { tIdx } = engine;
+  const spe = m => ctx.stats(m.mon)[5];
+  const rows = mine.map(m => {
+    const cells = foes.map(o => {
+      let atk = 0, atkType = null;
+      for (const s of m.stabs) { const x = o.def[tIdx[s]]; if (x > atk) { atk = x; atkType = s; } }
+      let recv = 0, recvType = null;
+      for (const s of o.stabs) { const x = m.def[tIdx[s]]; if (x > recv) { recv = x; recvType = s; } }
+      const faster = spe(m) > spe(o) ? 1 : spe(m) === spe(o) ? 0.5 : 0;
+      return { atk, atkType, recv, recvType, faster };
+    });
+    const n = cells.length || 1;
+    const offense = cells.reduce((a, c) => a + matchVal(c.atk), 0) / n;
+    const defense = -cells.reduce((a, c) => a + matchVal(c.recv), 0) / n;
+    const speed = cells.reduce((a, c) => a + c.faster, 0) / n;
+    const score = offense * 1.0 + defense * 0.9 + speed * 0.6 + m.indiv * 0.15;
+    return {
+      m, cells, offense, defense, speed, score,
+      se: cells.filter(c => c.atk >= 2).length,
+      weakTo: cells.filter(c => c.recv >= 2).length,
+      outspeed: cells.filter(c => c.faster === 1).length,
+    };
+  });
+  const ranked = [...rows].sort((a, b) => b.score - a.score);
+
+  let pair = null;
+  if (double && rows.length >= 2) {
+    for (let i = 0; i < rows.length; i++) for (let j = i + 1; j < rows.length; j++) {
+      const a = rows[i], b = rows[j];
+      // 둘 중 하나라도 효과 굉장을 주는 상대 수, 둘 다 약점을 찔리는 상대 수
+      const cover = foes.filter((_, k) => a.cells[k].atk >= 2 || b.cells[k].atk >= 2).length;
+      const both = foes.filter((_, k) => a.cells[k].recv >= 2 && b.cells[k].recv >= 2).length;
+      const s = a.score + b.score + 0.25 * cover - 0.35 * both;
+      if (!pair || s > pair.score) pair = { rows: [a, b], score: s, cover, both };
+    }
+  }
+  // 위협: 내 파티 여럿의 약점을 찌르고, 내가 효과 굉장을 주기 어려운 상대
+  const threats = foes.map((o, k) => ({
+    o, hitsMe: rows.filter(r => r.cells[k].recv >= 2).length, iHit: rows.filter(r => r.cells[k].atk >= 2).length,
+  })).map(t => ({ ...t, danger: t.hitsMe - t.iHit * 0.7 })).sort((a, b) => b.danger - a.danger);
+  return { rows, ranked, pair, threats };
 }
 
 /** 내 파티 각 포켓몬 vs 타깃 */

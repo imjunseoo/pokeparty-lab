@@ -1,10 +1,11 @@
-// 상성 탐색: 포켓몬 → 약점/내성, 자속 공격 상성, 카운터, 내 파티 대면, 실전 세팅
-import { store, getContext, partyMembers, addRecent, addToParty, usageInfo } from '../state.js';
+// 상성 탐색: 포켓몬 → 약점/내성, 내 파티 대면, 실전·추천 세팅, 카운터, 자속 공격 상성
+import { store, getContext, partyMembers, addRecent, addToParty, usageInfo, isGameMode, gameRule, whereToFind, setsOrder, gameOpts } from '../state.js';
 import { createPicker } from '../ui/picker.js';
 import { esc, on, toast, copyText, josa } from '../ui/dom.js';
 import { sprite, typeBadge, typeList, mult, statBars, dexNo, barList, moveLabel, itemLabel, natureText, spreadText, ICONS } from '../ui/components.js';
 import { ABILITY_EFFECTS } from '../core/engine.js';
 import { findCounters, partyVersus } from '../core/party.js';
+import { orderedSets, setCard } from '../ui/sets.js';
 
 const view = { slug: null, ability: undefined, tera: null };
 let root, resultEl, quickEl;
@@ -96,17 +97,21 @@ function render() {
   const tera = view.tera;
   const opts = { ability, tera };
 
+  // 약점 → 내 파티 대면 → 세팅 → 카운터 → 자속 공격 상성(맨 아래)
   resultEl.innerHTML = [
-    heroCard(mon, u),
-    `<div class="grid-2">${defenseCard(mon, u, opts)}${offenseCard(mon, tera)}</div>`,
+    heroCard(ctx, mon, u),
+    defenseCard(mon, u, opts),
     versusCard(ctx, mon, opts),
-    countersCard(ctx, mon, opts),
     usageCard(mon, u),
+    countersCard(ctx, mon, opts),
+    offenseCard(mon, tera),
   ].join('');
 }
 
-function heroCard(mon, u) {
+function heroCard(ctx, mon, u) {
   const { engine } = store;
+  const where = isGameMode() ? whereToFind(mon) : '';
+  const gameStats = isGameMode() && ctx.stats(mon) !== mon.st;
   const abilityChip = (a, hidden) => {
     const [ko, en, desc] = store.dex.abilities[a] || [a, a, ''];
     const effect = ABILITY_EFFECTS[a] ? ' effect' : '';
@@ -123,9 +128,11 @@ function heroCard(mon, u) {
         <span class="genus">${esc(mon.genus)}${mon.genus ? ' · ' : ''}${mon.gen}세대</span>
         ${flags.map(f => `<span class="pill-soft">${f}</span>`).join('')}
         ${u ? `<span class="pill-soft accent">${esc(usageInfo().label)} 사용률 ${u.u}% · ${u.r}위</span>` : ''}
+        ${isGameMode() ? `<span class="pill-soft accent">${where ? `게임 출현: ${esc(where)}` : '이 맵에서는 야생으로 안 나와요'}</span>` : ''}
       </div>
       <div class="abilities">${mon.ab.map(a => abilityChip(a, false)).join('')}${mon.ha && !mon.ab.includes(mon.ha) ? abilityChip(mon.ha, true) : ''}</div>
-      ${statBars(mon.st)}
+      ${statBars(ctx.stats(mon))}
+      ${gameStats ? '<p class="note">「포켓몬 파티!」 게임 데이터의 종족값이에요 (원작과 다름).</p>' : ''}
       <div class="hero-actions">
         <button class="btn primary" type="button" data-act="add-party">${ICONS.plus}내 파티에 추가</button>
         <button class="btn" type="button" data-act="copy-link">${ICONS.link}링크 복사</button>
@@ -146,7 +153,8 @@ function defenseCard(mon, u, { ability, tera }) {
         ${abilities.map(a => `<option value="${a}" ${a === ability ? 'selected' : ''}>${esc(engine.abilityKo(a))}${a === mon.ha ? ' (숨특)' : ''}${ABILITY_EFFECTS[a] ? ' ★' : ''}</option>`).join('')}
         <option value="" ${!ability ? 'selected' : ''}>특성 효과 무시</option>
       </select></label>`;
-  const teraSelect = `
+  // 게임 모드에서는 테라스탈을 쓰는 룰일 때만
+  const teraSelect = isGameMode() && !gameRule()?.uses.includes('tera') ? '' : `
     <label class="field">테라스탈
       <select class="select" id="m-tera">
         <option value="">없음</option>
@@ -229,7 +237,8 @@ function versusCard(ctx, mon, opts) {
 function countersCard(ctx, mon, opts) {
   const { engine } = store;
   const list = findCounters(ctx, mon, opts, 12);
-  const scope = store.usage ? `${usageInfo().label} 실전 포켓몬 중` : '최종진화 포켓몬 중 (파티 추천 옵션 기준)';
+  const scope = isGameMode() ? '이 맵에서 잡을 수 있는 포켓몬 중'
+    : store.usage ? `${usageInfo().label} 실전 포켓몬 중` : '최종진화 포켓몬 중 (파티 추천 옵션 기준)';
   return `
   <section class="card">
     <div class="card-head"><h3>상성으로 잡기 좋은 포켓몬</h3><span class="sub">${esc(scope)} · 자속 효과 굉장 + 상대 자속 반감</span></div>
@@ -239,18 +248,32 @@ function countersCard(ctx, mon, opts) {
         <span class="mc-name">${esc(r.c.mon.ko)}</span>
         ${typeList(engine, r.c.mon.t, 'sm')}
         <span class="mc-sub">주는 ${mult(r.off, true)} 받는 ${mult(r.def, true)}</span>
+        ${isGameMode() ? `<span class="mc-where">${esc(whereToFind(r.c.mon))}</span>` : ''}
       </a>`).join('')}</div>` : '<p class="empty">자속으로 효과가 굉장한 후보가 없어요.</p>'}
   </section>`;
 }
 
+/** 실전 통계가 없을 때: Smogon 추천 → 랜덤배틀 → 자체 생성 세팅을 모두 보여준다 */
+function recommendedSection(mon) {
+  const { engine, sets } = store;
+  const info = usageInfo();
+  const sub = isGameMode()
+    ? `${gameRule().name} 기준 · 게임에서 못 구하는 도구·기술은 취소선`
+    : info ? `${info.label} 실전 통계 상위 ${info.count}위 안에 없어 추천 세팅을 보여드려요`
+    : 'Smogon 분석가 세팅 · 랜덤배틀 역할 세팅 · 자체 생성';
+  const head = `<div class="card-head"><h3>추천 세팅</h3><span class="sub">${esc(sub)}</span></div>`;
+  if (!sets) return `<section class="card">${head}<p class="note">추천 세팅 불러오는 중…</p></section>`;
+  const list = orderedSets(sets, mon.id, setsOrder());
+  if (!list.length) return `<section class="card">${head}<p class="note">세팅 정보가 없어요.</p></section>`;
+  const opts = { mode: store.mode, game: gameOpts(), header: false };
+  return `<section class="card">${head}
+    <div class="sets">${list.map(s => setCard(engine, sets, mon, s, opts)).join('')}</div></section>`;
+}
+
 function usageCard(mon, u) {
   const { engine, usage, dex } = store;
-  if (!usage) return '';
+  if (!usage || !u) return recommendedSection(mon);
   const info = usageInfo();
-  if (!u) {
-    return `<section class="card"><div class="card-head"><h3>실전 세팅</h3><span class="sub">${esc(info.label)} · ${esc(info.month)}</span></div>
-      <p class="note">이 포켓몬은 ${esc(info.label)} 사용률 상위 ${info.count}위 안에 없어요. 상단의 데이터 기준을 바꿔 보세요.</p></section>`;
-  }
   const monLink = id => {
     const m = engine.byId.get(id);
     return { html: `${sprite(m)}${esc(m.ko)}`, attrs: `data-go="${m.slug}"` };
