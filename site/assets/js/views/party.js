@@ -3,14 +3,16 @@
 // 예시를 고르면 바로 다음 추천을 다시 계산한다.
 import {
   store, update, getContext, partyMembers, addToParty, encodeParty, usageInfo,
-  isGameMode, gameRule, battleMode, whereToFind, setsOrder, gameOpts,
+  isGameMode, gameRule, battleMode, whereToFind, setsOrder, gameOpts, evoOptions, megaOptions, loadMoves, sanitizeSet,
 } from '../state.js';
 import { createPicker } from '../ui/picker.js';
 import { esc, on, toast, copyText, josa } from '../ui/dom.js';
 import { sprite, typeBadge, typeList, mult, ICONS, moveLabel, itemLabel, natureText, spreadText } from '../ui/components.js';
 import { ABILITY_EFFECTS } from '../core/engine.js';
-import { analyze, recommend, recommendTypes, explainSlot } from '../core/party.js';
+import { analyze, recommend, recommendTypes, explainSlot, explainCandidate, memberValues, alternativesFor } from '../core/party.js';
 import { orderedSets, setCard } from '../ui/sets.js';
+import { reasonChip, commentText, itemName } from '../ui/reasons.js';
+import { buildCard, readEditor, fillEditor, analyzeMember } from '../ui/builder.js';
 
 // 사용자가 처음 보여준 예시 파티 (Gemini 예시 코드의 파티 구성)
 const EXAMPLE = ['delphox', 'luxray', 'iron-crown', 'quagsire', 'sableye', 'vivillon'];
@@ -19,6 +21,7 @@ const LEVEL_LABEL = { danger: '위험', warn: '주의', good: '좋음', info: '�
 let root, slotsEl, recEl, analysisEl, optionsEl;
 let optionsOpen = null;   // null = 모드 기본값 (게임 모드는 펼침)
 let deepOpen = false;
+let editing = null;       // 내 세팅 입력 폼을 연 멤버 번호
 const recOffset = new Map();   // 타입별 "다른 예시 보기" 위치
 
 export function initParty(el) {
@@ -59,18 +62,28 @@ export function initParty(el) {
     toast(await copyText(url) ? '파티 공유 링크를 복사했어요' : '복사에 실패했어요');
   });
   on(root, 'click', '[data-act="example"]', () => {
+    editing = null;
     update(s => {
       s.party = EXAMPLE.map(slug => store.engine.bySlug.get(slug)).filter(Boolean)
         .map(m => ({ id: m.id, ability: null, tera: null, picked: false }));
     });
     toast('예시 파티를 불러왔어요');
   });
-  on(root, 'click', '[data-act="clear"]', () => update(s => { s.party = []; }));
+  on(root, 'click', '[data-act="clear"]', () => { editing = null; update(s => { s.party = []; }); });
   on(root, 'click', '[data-act="autofill"]', autofill);
-  on(root, 'click', '[data-remove]', (e, el) => update(s => { s.party.splice(+el.dataset.remove, 1); }));
+  on(root, 'click', '[data-remove]', (e, el) => { editing = null; update(s => { s.party.splice(+el.dataset.remove, 1); }); });
   on(root, 'click', '[data-add]', (e, el) => {
     const mon = store.engine.byId.get(+el.dataset.add);
-    const err = addToParty(mon, { picked: true });
+    const plan = { picked: true, evo: +el.dataset.evo || null, mega: +el.dataset.mega || null };
+    // 멤버 점수의 "대신 노릴 후보": 그 자리를 바꿔 본다
+    if (el.dataset.replace !== undefined) {
+      const i = +el.dataset.replace, old = store.engine.byId.get(store.party[i].id);
+      if (store.party.some((m, j) => j !== i && store.engine.byId.get(m.id).sp === mon.sp)) return toast(`${josa(mon.ko, '와과')} 같은 종이 이미 파티에 있어요`);
+      editing = null;
+      update(s => { s.party[i] = { id: mon.id, ability: null, tera: null, set: null, ...plan }; });
+      return toast(`${josa(old.ko, '을를')} ${josa(mon.ko, '으로')} 바꿔 봤어요 · 마음에 안 들면 ✕로 빼고 다시 넣으세요`);
+    }
+    const err = addToParty(mon, plan);
     toast(err || `${josa(mon.ko, '을를')} 넣었어요 · 다음 추천을 다시 계산했어요`);
   });
   on(root, 'click', '[data-more]', (e, el) => {
@@ -79,8 +92,9 @@ export function initParty(el) {
   });
   on(root, 'click', '[data-go]', (e, el) => { e.preventDefault(); location.hash = `#/matchup/${el.dataset.go}`; });
   on(root, 'change', '[data-field]', (e, el) => {
-    const i = +el.dataset.i;
-    update(s => { s.party[i][el.dataset.field] = el.value || null; });
+    const i = +el.dataset.i, field = el.dataset.field;
+    const numeric = field === 'evo' || field === 'mega';
+    update(s => { s.party[i][field] = el.value ? (numeric ? +el.value : el.value) : null; });
   });
   on(root, 'change', '[data-filter]', (e, el) => {
     const key = el.dataset.filter;
@@ -93,6 +107,33 @@ export function initParty(el) {
     update(s => { s.game[key] = el.type === 'checkbox' ? el.checked : el.value; });
   });
   on(root, 'input', 'input[type="range"][data-filter]', (e, el) => { el.nextElementSibling.textContent = el.value; });
+  // 내 세팅 입력
+  on(root, 'click', '[data-act="set-edit"]', (e, el) => { editing = +el.dataset.i; loadMoves(); renderParty(); });
+  on(root, 'click', '[data-act="set-cancel"]', () => { editing = null; renderParty(); });
+  on(root, 'click', '[data-act="set-clear"]', (e, el) => {
+    editing = null;
+    update(s => { s.party[+el.dataset.i].set = null; });
+    toast('입력한 세팅을 지웠어요');
+  });
+  on(root, 'click', '[data-act="set-fill"]', (e, el) => {
+    const i = +el.dataset.i;
+    const r = analyzeMember(store.party[i], partyMembers(getContext())[i]);
+    if (r) fillEditor(el.closest('form'), r.best);
+    toast('최선 세팅을 채웠어요 · 실제와 다르면 고친 뒤 저장하세요');
+  });
+  root.addEventListener('submit', e => {
+    const form = e.target.closest('.set-editor');
+    if (!form) return;
+    e.preventDefault();
+    const i = +form.dataset.editor;
+    const { set, ability } = readEditor(form);
+    editing = null;
+    update(s => {
+      s.party[i].set = sanitizeSet(set);
+      if (ability) s.party[i].ability = ability;
+    });
+    toast('내 세팅을 저장했어요 · 할 일을 확인하세요');
+  });
   optionsEl.addEventListener('toggle', () => { optionsOpen = optionsEl.open; });
   root.addEventListener('toggle', e => { if (e.target.id === 'p-deep') deepOpen = e.target.open; }, true);
 }
@@ -104,9 +145,15 @@ function autofill() {
   if (members.length >= 6) return toast('파티가 이미 6마리예요');
   const r = recommend(ctx, members);
   update(s => {
-    for (const m of r.party.slice(s.party.length)) s.party.push({ id: m.id, ability: null, tera: null, picked: true });
+    for (const c of r.party.slice(s.party.length)) s.party.push({ ...addPlan(c), ability: null, tera: null, picked: true, set: null });
   });
   toast(`${r.picks.size}마리를 예시로 채웠어요`);
+}
+
+/** 추천 후보 → 파티에 넣을 모습: 진화 전으로만 잡히면 그 모습 + 진화 목표, 메가진화 후보면 메가 폼 */
+function addPlan(c) {
+  const catchMon = !c.direct && c.from?.length ? c.from[0] : c.base;
+  return { id: catchMon.id, evo: catchMon.id !== c.base.id ? c.base.id : null, mega: c.mega ? c.mon.id : null };
 }
 
 export function renderParty() {
@@ -158,20 +205,6 @@ function renderOptions(ctx) {
   optionsEl.open = optionsOpen ?? isGameMode();
 }
 
-function reasonChip(engine, r) {
-  switch (r.kind) {
-    case 'def': return `<span class="reason">${typeBadge(engine, r.type, 'sm')} ${r.mult === 0 ? '무효' : r.mult <= 0.25 ? '¼ 반감' : '반감'}</span>`;
-    case 'off': return `<span class="reason off">${r.types.slice(0, 4).map(t => typeBadge(engine, t, 'sm')).join('')} 공략</span>`;
-    case 'cov': return `<span class="reason off">공격 범위 +${Math.round(r.value * 100)}%</span>`;
-    case 'mate': return `<span class="reason mate">${esc(r.with.ko)} 동료 ${r.pct}%</span>`;
-    case 'usage': return `<span class="reason usage">사용률 ${r.u}% · ${r.rank}위</span>`;
-    case 'bst': return `<span class="reason usage">높은 종족값 ${r.value}</span>`;
-    case 'warn': return `<span class="reason warn">${typeBadge(engine, r.type, 'sm')} 약점 ${r.count}마리째</span>`;
-    case 'warn-types': return `<span class="reason warn">${r.types.slice(0, 3).map(t => typeBadge(engine, t, 'sm')).join('')} 약점 겹침 주의</span>`;
-    default: return '';
-  }
-}
-
 function renderSlots(ctx, members) {
   const { engine, dex } = store;
   const showTera = !isGameMode() || gameRule()?.uses.includes('tera');
@@ -182,24 +215,38 @@ function renderSlots(ctx, members) {
       html.push(`<div class="slot empty-slot"><div><b>빈 슬롯 ${i + 1}</b>위 검색으로 가진 포켓몬을 넣거나<br>아래 추천 속성의 예시를 골라 보세요</div></div>`);
       continue;
     }
-    const mon = pm.mon;
+    // caught: 가진 모습 / mon: 분석에 쓰는 모습(최종 진화 → 메가진화) / evolved: 메가진화 전 최종 진화
+    const caught = pm.base, mon = pm.mon;
+    const finals = evoOptions(caught);
+    const evolved = (finals.find(f => f.mon.id === m.evo) || finals[0])?.mon || caught;
+    const megas = megaOptions(evolved);
     const abilities = engine.abilitiesOf(mon);
     const reasons = m.picked ? explainSlot(ctx, members, i).filter(r => r.kind !== 'usage') : [];
-    const where = isGameMode() ? whereToFind(mon) : '';
+    const where = isGameMode() ? whereToFind(caught) : '';
+    const evoNote = mon.id !== caught.id
+      ? `<div class="slot-evo">→ <b>${esc(mon.ko)}</b> 기준으로 분석${pm.stone ? ` · ${esc(itemName(pm.stone))}` : ''}</div>` : '';
     html.push(`
       <div class="slot ${m.picked ? 'picked' : ''}">
         <div class="slot-top">
-          <a href="#/matchup/${mon.slug}" data-go="${mon.slug}" title="상성 보기">${sprite(mon)}</a>
+          <a href="#/matchup/${caught.slug}" data-go="${caught.slug}" title="상성 보기">${sprite(caught)}</a>
           <div>
-            <div class="slot-name"><a href="#/matchup/${mon.slug}" data-go="${mon.slug}">${esc(mon.ko)}</a>${m.picked ? '<span class="pill-soft accent">추천</span>' : ''}</div>
+            <div class="slot-name"><a href="#/matchup/${caught.slug}" data-go="${caught.slug}">${esc(caught.ko)}</a>${m.picked ? '<span class="pill-soft accent">추천</span>' : ''}</div>
             <div class="slot-sub">${typeList(engine, mon.t, 'sm')}${pm.u ? `<span class="note">${pm.u.u}%</span>` : ''}${where ? `<span class="note">${esc(where)}</span>` : ''}</div>
+            ${evoNote}
           </div>
           <div class="slot-actions">
             <button type="button" data-remove="${i}" title="빼기" aria-label="파티에서 빼기">${ICONS.close}</button>
           </div>
         </div>
-        <div class="slot-fields ${showTera ? '' : 'one'}">
-          <label>특성<select class="select" data-field="ability" data-i="${i}">
+        <div class="slot-fields ${showTera || finals.length > 1 || megas.length ? '' : 'one'}">
+          ${finals.length > 1 ? `<label>진화 목표<select class="select" data-field="evo" data-i="${i}">
+            ${finals.map(f => `<option value="${f.mon.id}" ${f.mon.id === evolved.id ? 'selected' : ''}>${esc(f.mon.ko)}${f.item ? ` (${esc(itemName(f.item))})` : ''}</option>`).join('')}
+          </select></label>` : ''}
+          ${megas.length ? `<label>메가진화<select class="select" data-field="mega" data-i="${i}">
+            <option value="">안 함</option>
+            ${megas.map(([id, stone]) => `<option value="${id}" ${id === m.mega ? 'selected' : ''}>${esc(engine.byId.get(id)?.ko || '')} · ${esc(itemName(stone))}</option>`).join('')}
+          </select></label>` : ''}
+          <label>특성<select class="select" data-field="ability" data-i="${i}" ${abilities.length < 2 ? 'disabled' : ''}>
             ${abilities.map(a => `<option value="${a}" ${a === pm.ability ? 'selected' : ''}>${esc(engine.abilityKo(a))}${ABILITY_EFFECTS[a] ? ' ★' : ''}</option>`).join('')}
           </select></label>
           ${showTera ? `<label>테라스탈<select class="select" data-field="tera" data-i="${i}">
@@ -207,15 +254,20 @@ function renderSlots(ctx, members) {
             ${[...dex.types, 'stellar'].map(t => `<option value="${t}" ${t === m.tera ? 'selected' : ''}>${esc(engine.typeKo(t))}</option>`).join('')}
           </select></label>` : ''}
         </div>
-        ${reasons.length ? `<div class="reasons">${reasons.map(r => reasonChip(engine, r)).join('')}</div>` : ''}
+        ${reasons.length ? `<div class="reasons">${reasons.map(r => reasonChip(engine, r)).join('')}</div>
+          <p class="slot-why">${esc(commentText(engine, reasons, pm))}</p>` : ''}
       </div>`);
   }
   slotsEl.innerHTML = html.join('');
 }
 
-/** 예시 포켓몬 아래에 붙는 한 줄: 게임 모드는 출현 장소, 실전 모드는 사용률, 타입 모드는 종족값 */
+/** 예시 포켓몬 아래에 붙는 한 줄: 게임 모드는 잡는 곳(진화 전으로 잡으면 그 모습), 실전 모드는 사용률, 타입 모드는 종족값 */
 function exampleHint(ctx, c) {
-  if (isGameMode()) return whereToFind(c.mon) || '';
+  if (isGameMode()) {
+    const catchMon = !c.direct && c.from?.length ? c.from[0] : c.base;
+    const where = whereToFind(catchMon);
+    return catchMon.id !== c.base.id ? `${catchMon.ko} 잡아서 진화${where ? ` · ${where}` : ''}` : where || '';
+  }
   if (c.u) return `사용률 ${c.u.u}%`;
   return `종족값 ${ctx.stats(c.mon).reduce((a, b) => a + b, 0)}`;
 }
@@ -238,20 +290,29 @@ function renderRec(ctx, members) {
     return;
   }
   const cards = recs.map((r, rank) => {
-    const total = r.list.length;
+    // 같은 종의 일반·메가진화 후보는 점수가 높은 쪽만
+    const seen = new Set();
+    const list = r.list.filter(({ c }) => !seen.has(c.sp) && seen.add(c.sp));
+    const total = list.length;
     let off = recOffset.get(r.type) || 0;
     if (off >= total) { off = 0; recOffset.set(r.type, 0); }
-    const examples = r.list.slice(off, off + 3);
+    const examples = list.slice(off, off + 3);
     return `<div class="rec-type">
       <div class="rec-head">${typeBadge(engine, r.type, 'lg')}<span class="rec-rank">${rank + 1}순위</span>
         <span class="note">후보 ${total}마리</span></div>
       <div class="reasons">${r.reasons.map(x => reasonChip(engine, x)).join('') || '<span class="note">공격·방어 균형을 고르게 올려줘요</span>'}</div>
-      <div class="rec-examples">${examples.map(({ c }) => `
-        <button class="rec-mon" type="button" data-add="${c.id}" title="파티에 넣기">
+      <div class="rec-examples">${examples.map(({ c }) => {
+        const plan = addPlan(c);
+        const why = commentText(engine, explainCandidate(ctx, members, c), c);
+        return `
+        <button class="rec-mon" type="button" data-add="${plan.id}"${plan.evo ? ` data-evo="${plan.evo}"` : ''}${plan.mega ? ` data-mega="${plan.mega}"` : ''} title="파티에 넣기">
           ${sprite(c.mon)}
-          <span class="rm-main"><b>${esc(c.mon.ko)}</b>${typeList(engine, c.mon.t, 'sm')}<span class="rm-hint">${esc(exampleHint(ctx, c))}</span></span>
+          <span class="rm-main"><b>${esc(c.mon.ko)}</b>${typeList(engine, c.mon.t, 'sm')}
+            <span class="rm-why">${esc(why)}</span>
+            <span class="rm-hint">${esc(exampleHint(ctx, c))}</span></span>
           <span class="rm-add">${ICONS.plus}</span>
-        </button>`).join('')}</div>
+        </button>`;
+      }).join('')}</div>
       ${total > 3 ? `<button class="link-btn" type="button" data-more="${r.type}">다른 예시 보기 (${Math.min(off + 3, total)}/${total})</button>` : ''}
     </div>`;
   }).join('');
@@ -267,6 +328,7 @@ function renderAnalysis(ctx, members) {
   }
   const a = analyze(ctx, members);
   analysisEl.innerHTML = [
+    rankCard(ctx, members),
     setsCard(members),
     scoreCard(a, members),
     diagCard(a),
@@ -275,6 +337,77 @@ function renderAnalysis(ctx, members) {
       <div class="deep-body">${coverageCard(a, members)}${matrixCard(a, members)}</div>
     </details>`,
   ].join('');
+}
+
+// 멤버 점수 (0~100) = 전투력 45% + 파티 기여 35% + 기본 능력 20%
+//   전투력: 세팅 점수(내 세팅을 넣었으면 지금 세팅, 아니면 이 게임 최선 세팅) — 이 맵 상대 후보와 1:1로 싸울 때의 힘
+//   파티 기여: 이 멤버를 빼면 파티 점수가 얼마나 떨어지는지 (약점 보완·공격 범위, 약점이 겹치면 마이너스)
+//   기본 능력: 종족값 (최종 진화·메가진화 기준)
+const RANKS = [[75, '에이스', 'ace'], [60, '주전', 'good'], [45, '보통', 'ok'], [0, '교체 후보', 'weak']];
+const pct = (v, lo, hi) => Math.round(100 * Math.min(1, Math.max(0, (v - lo) / (hi - lo))));
+
+function rankCard(ctx, members) {
+  const { engine } = store;
+  if (members.length < 2) return '';
+  const values = memberValues(ctx, members);
+  const rows = members.map((m, i) => {
+    const r = isGameMode() && store.moves ? analyzeMember(store.party[i], m) : null;
+    const ev = r ? r.now || r.top : null;
+    const raw = pct(engine.effectiveBst(m.mon), 300, 600);
+    const battle = ev ? pct(ev.score, 30, 115) : raw;
+    const synergy = Math.round(100 / (1 + Math.exp(-values[i].synergy / 3)));
+    const total = Math.round(0.45 * battle + 0.35 * synergy + 0.2 * raw);
+    return { i, m, r, ev, raw, battle, synergy, total, v: values[i], rank: RANKS.find(([min]) => total >= min) };
+  }).sort((a, b) => b.total - a.total);
+  const bar = (label, v, title) => `<span class="mr-bar" title="${esc(title)}"><span>${label}</span><span class="track"><span style="width:${v}%"></span></span><b>${v}</b></span>`;
+  const names = ts => ts.map(t => engine.typeKo(t)).join('·');
+  const items = rows.map((row, k) => {
+    const { m, v, ev, r } = row;
+    const good = [], bad = [];
+    const def = v.reasons.filter(x => x.kind === 'def');
+    const off = v.reasons.find(x => x.kind === 'off');
+    if (def.length) good.push(`${names(def.map(x => x.type))} 공격을 받아줘요`);
+    if (off) good.push(`${names(off.types)} 타입을 혼자 찔러요`);
+    if (v.exposed.length) good.push(`빼면 ${names(v.exposed)} 약점이 몰려요`);
+    const warn = v.reasons.filter(x => x.kind === 'warn');
+    if (warn.length) bad.push(`${names(warn.map(x => x.type))} 약점이 겹쳐요`);
+    if (ev) {
+      if (ev.offense >= 85) good.push(`화력이 강해요(${Math.round(ev.offense)}%)`);
+      else if (ev.offense < 60) bad.push(`화력이 약해요(${Math.round(ev.offense)}%)`);
+      if (ev.speed >= 0.8) good.push('대부분보다 빨라요');
+      if (ev.taken >= 60) bad.push('잘 버티지 못해요');
+    }
+    const potential = r?.now && r.top.score - r.now.score >= 5 ? `<p class="note">최선 세팅이면 전투력 ${pct(r.top.score, 30, 115)} (지금 ${row.battle}) — 아래 멤버별 세팅의 할 일 참고</p>` : '';
+    // 교체 후보: 이 자리에 대신 넣으면 좋은 후보 (게임에서 잡을 수 있는 포켓몬 중)
+    const swap = row.rank[2] === 'weak' || (k === rows.length - 1 && row.total < 55);   // 꼴찌가 낮으면 교체 후보도 보여 줌
+    const alts = swap ? alternativesFor(ctx, members, row.i, 6)
+      .filter(({ c }, j, arr) => arr.findIndex(x => x.c.sp === c.sp) === j).slice(0, 3) : [];
+    const altHtml = alts.length ? `<div class="mr-alts"><span class="note">대신 노릴 후보</span>${alts.map(({ c }) => {
+      const plan = addPlan(c);
+      return `<button class="opp" type="button" data-replace="${row.i}" data-add="${plan.id}"${plan.evo ? ` data-evo="${plan.evo}"` : ''}${plan.mega ? ` data-mega="${plan.mega}"` : ''} title="이 자리를 ${esc(josa(c.mon.ko, '으로'))} 바꾸기">${sprite(c.mon)}<span><b>${esc(c.mon.ko)}</b><span class="note">${esc(exampleHint(ctx, c))}</span></span></button>`;
+    }).join('')}</div>` : '';
+    return `<li class="mr-row mr-${row.rank[2]}">
+      <span class="mr-rank">${k + 1}</span>
+      ${sprite(m.base)}
+      <div class="mr-main">
+        <div class="mr-name"><b>${esc(m.base.ko)}</b>${m.mon.id !== m.base.id ? `<span class="note">→ ${esc(m.mon.ko)}</span>` : ''}<span class="pill-soft mr-pill">${row.rank[1]}</span></div>
+        <div class="mr-bars">
+          ${bar('전투력', row.battle, ev ? `${r.now ? '지금 세팅' : '최선 세팅'} 기준 · 화력 ${Math.round(ev.offense)}% · 받는 피해 ${Math.round(ev.taken)}% · 선공 ${Math.round(ev.speed * 100)}%` : '종족값 기준 (게임 룰 모드에서 세팅으로 계산)')}
+          ${bar('파티 기여', row.synergy, '빼면 파티 점수가 얼마나 떨어지는지 (약점이 겹치면 낮음)')}
+          ${bar('기본 능력', row.raw, `종족값 ${engine.effectiveBst(m.mon)}`)}
+        </div>
+        <p class="mr-why">${good.length ? `<span class="good"><b>강점</b> ${esc(good.join(' · '))}</span>` : ''}${bad.length ? `<span class="bad"><b>아쉬운 점</b> ${esc(bad.join(' · '))}</span>` : ''}</p>
+        ${potential}${altHtml}
+      </div>
+      <span class="mr-total"><b>${row.total}</b><span>점</span></span>
+    </li>`;
+  }).join('');
+  return `<section class="card">
+    <div class="card-head"><h3>멤버 점수 · 누가 좋은 포켓몬?</h3>
+      <span class="sub">전투력 45% + 파티 기여 35% + 기본 능력 20% · ${isGameMode() ? `${esc(store.gameData.maps.find(x => x.key === store.game.map)?.name || '')} 맵 상대 후보 기준` : '지금 데이터 기준'}</span></div>
+    <ol class="member-rank">${items}</ol>
+    ${isGameMode() && !store.party.some(x => x.set) ? '<p class="note">「내 세팅 입력」을 하면 전투력이 지금 세팅 기준으로 바뀌어요 (입력 전에는 최선 세팅 기준).</p>' : ''}
+  </section>`;
 }
 
 /** 실전 통계에 없는 멤버: 추천 세팅(Smogon → 랜덤배틀 → 자체 생성) + 다른 세팅 펼치기 */
@@ -291,10 +424,28 @@ function recommendedCard(m) {
   return setCard(engine, sets, m.mon, first, { ...opts, extra: more });
 }
 
+/** 참고용 추천 세팅 전부 (게임 모드 멤버 카드 안에 접어 둠) */
+function recommendedList(m) {
+  const { engine, sets } = store;
+  if (!sets) return '<p class="note">추천 세팅 불러오는 중…</p>';
+  const opts = { mode: store.mode, game: gameOpts(), header: false };
+  return orderedSets(sets, m.id, setsOrder()).map(s => setCard(engine, sets, m.mon, s, opts)).join('') || '';
+}
+
 function setsCard(members) {
   const { engine, usage } = store;
   const info = usageInfo();
   const line = (label, vals) => (vals ? `<div class="set-line"><span>${label}</span><span class="vals">${vals}</span></div>` : '');
+  if (isGameMode()) {
+    // 「포켓몬 파티!」: 배울 수 있는 기술·구할 수 있는 도구로 계산한 최선 세팅 + 내 세팅 입력 → 할 일
+    if (!store.moves) loadMoves();
+    const cards = members.map((m, i) => buildCard(i, store.party[i], m, { editing: editing === i, recommended: recommendedList(m) })).join('');
+    return `
+    <section class="card">
+      <div class="card-head"><h3>멤버별 세팅</h3><span class="sub">${esc(`${gameRule().name} · ${battleMode() === 'double' ? '더블' : '싱글'} · Lv.${store.gameData.finalLevel} 기준 · 「내 세팅 입력」으로 지금 세팅을 넣으면 최선까지 할 일을 알려줘요`)}</span></div>
+      <div class="sets">${cards}</div>
+    </section>`;
+  }
   const cards = members.map(m => {
     const u = m.u;
     if (!u) return recommendedCard(m);

@@ -15,6 +15,8 @@ import { DATA_DIR, loadTables, toId, writeJson } from './lib/pokeapi.mjs';
 import { loadMarshal } from './lib/marshal.mjs';
 import { decodePng } from './lib/png.mjs';
 import { ICON_FRAME, ICON_GRID, iconCells, packCells, cellsDiff, composeHud, hudTemplate } from './lib/icons.mjs';
+import { parseBoard } from './lib/game-board.mjs';
+import { buildMoves } from './lib/game-moves.mjs';
 
 const args = process.argv.slice(2);
 const GAME = args.includes('--game') ? args[args.indexOf('--game') + 1]
@@ -44,14 +46,13 @@ function block(src, name, open = '[') {
   throw new Error(`${name} 괄호가 닫히지 않음`);
 }
 const syms = text => [...text.replace(/#.*$/gm, '').matchAll(/:([A-Z][A-Z0-9_]*)/g)].map(m => m[1]);
-const hashEntries = text => [...text.replace(/#.*$/gm, '').matchAll(/(\w+):\s*([\[{"][^\n]*)/g)];
 
 function main() {
   if (!existsSync(join(GAME, 'Data', 'species.dat'))) throw new Error(`게임 폴더를 찾을 수 없음: ${GAME}`);
   const dat = f => loadMarshal(readFileSync(join(GAME, 'Data', f)));
   const dex = JSON.parse(readFileSync(join(DATA_DIR, 'pokedex.json'), 'utf8'));
   const sets = JSON.parse(readFileSync(join(DATA_DIR, 'sets.json'), 'utf8'));
-  return loadTables(['items', 'item_names', 'pokemon_species']).then(T => build({ dat, dex, sets, T }));
+  return loadTables(['items', 'item_names', 'pokemon_species', 'moves', 'move_names']).then(T => build({ dat, dex, sets, T }));
 }
 
 function build({ dat, dex, sets, T }) {
@@ -144,6 +145,9 @@ function build({ dat, dex, sets, T }) {
   const MAP_POOL = { tour: 'area', board: 'type', outlet: 'all', island: 'gen', maze: 'color' };
   const maps = [...mapBlock.matchAll(/(\w+):\s*\{\s*name:\s*"([^"]+)"[\s\S]*?desc:\s*\[([^\]]*)\]/g)]
     .map(([, key, name, desc]) => ({ key, name, desc: [...desc.matchAll(/"([^"]+)"/g)].map(m => m[1]).join(' · '), pool: MAP_POOL[key] || 'all' }));
+  // 칸 표 (칸 추천): 맵마다 칸 좌표·종류·다음 칸·갈림길, 트레이너 타입, 야생 지역 이름 (색깔 지역은 pool 의 한글 색 이름으로)
+  const board = parseBoard(script);
+  board.colors = Object.fromEntries(Object.entries(board.colors).map(([k, c]) => [k, COLOR_KO[c] || null]));
 
   // ── 기믹 룰 ──
   const ruleNames = Object.fromEntries([...block(shopSrc, 'RULE_NAMES', '{').matchAll(/(\w+):\s*"([^"]+)"/g)].map(m => [m[1], m[2]]));
@@ -227,6 +231,22 @@ function build({ dat, dex, sets, T }) {
     if (bad.size) illegal[id] = [...bad];
   }
 
+  // ── 내 세팅 입력용: 기술 표 + 포켓몬별로 배울 수 있는 기술 (moves.json, 세팅 입력을 열 때만 받음) ──
+  // 기술 한글명: 게임 표시 이름 → (게임에 한글이 없는 9세대 기술은) PokeAPI 한글명 → 영문
+  const moveSlug = new Map(T.moves.map(m => [toId(m.identifier), m.identifier]));
+  const moveKoApi = new Map();
+  const moveById = new Map(T.moves.map(m => [m.id, m.identifier]));
+  for (const r of T.move_names) if (r.local_language_id === '3' && moveById.has(r.move_id)) moveKoApi.set(moveById.get(r.move_id), r.name);
+  const hasHangul = s => /[가-힣]/.test(s);
+  const moveData = buildMoves({
+    moves: dat('moves.dat'), toId,
+    slugOf: key => moveSlug.get(toId(key)) || toId(key),
+    nameOf: (slug, en) => [msg[5].get(en), moveKoApi.get(slug)].find(s => s && hasHangul(s)) || en,
+    learnOf: fullLearn, ids: [...new Set([...gameMon.values()].map(g => g.dex.id))],
+  });
+  writeJson(join(DATA_DIR, 'game', 'moves.json'), moveData)
+    .then(size => console.log(`✔ game/moves.json · 기술 ${moveData.list.length}개 · 습득표 ${Object.keys(moveData.learn).length}종 · ${size}`));
+
   // ── 메가진화: 기본 폼 dex id → [[메가 폼 dex id, 메가스톤]] (게임 상점의 메가스톤 기준) ──
   const megas = {};
   for (const [, g] of gameMon) {
@@ -237,6 +257,40 @@ function build({ dat, dex, sets, T }) {
     const stone = item(String(s.mega_stone));
     if (!items.mega.includes(stone)) continue;
     (megas[base.id] ||= []).push([g.dex.id, stone]);
+  }
+
+  // ── 진화: 진화 전 dex id → [[최종 진화 dex id, 필요한 진화 도구 또는 null]] (리전폼은 같은 폼으로 진화) ──
+  // 파티 추천은 진화 전 포켓몬도 최종 진화 기준으로 평가한다 (토너먼트 Lv.75 까지 레벨이 오르므로)
+  const nextOf = key => {
+    const g = gameMon.get(key), form = g.data.form;
+    return (g.data.evolutions || []).filter(e => !(e.length >= 4 && e[3]) && String(e[1]) !== 'None').map(e => {
+      const target = String(e[0]);
+      const to = (form && gameMon.has(`${target}_${form}`)) ? `${target}_${form}` : target;
+      const how = /^Item/.test(String(e[1])) && e[2] ? item(String(e[2])) : null;
+      return gameMon.has(to) ? [to, how] : null;
+    }).filter(Boolean);
+  };
+  const evo = {};
+  for (const [key, g] of gameMon) {
+    if (g.dex.mega || !nextOf(key).length) continue;
+    const finals = new Map();
+    const walk = (k, how, seen) => {
+      const nx = nextOf(k).filter(([to]) => !seen.has(to));
+      if (!nx.length) { const id = gameMon.get(k).dex.id; if (!finals.has(id)) finals.set(id, how); return; }
+      for (const [to, h] of nx) walk(to, how || h, new Set(seen).add(to));
+    };
+    walk(key, null, new Set([key]));
+    finals.delete(g.dex.id);
+    if (finals.size) evo[g.dex.id] = [...new Map([...(evo[g.dex.id] || []), ...finals])];
+  }
+
+  // ── 야생 포획 등급 (보드 사파리): 원래 포획률 120↑ 흔함(0) · 45↑ 보통(1) · 그 밖 희귀(2) → 한 번 던질 때 65 / 50 / 35% ──
+  const catchTier = {};
+  for (const [, g] of gameMon) {
+    if (g.dex.mega) continue;
+    const rate = +g.data.catch_rate || 0;
+    const tier = rate >= 120 ? 0 : rate >= 45 ? 1 : 2;
+    catchTier[g.dex.id] = Math.min(catchTier[g.dex.id] ?? 2, tier);
   }
 
   // ── 게임이 원작과 다른 타입·종족값 (있으면 게임 값 우선) ──
@@ -256,11 +310,14 @@ function build({ dat, dex, sets, T }) {
     levelTable,
     tourneyShop,
     maps,
+    board,
     areas,
     pool,
     items,
     itemNames,
     megas,
+    evo,
+    catchTier,
     illegal,
     changed,
   };

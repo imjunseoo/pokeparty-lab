@@ -254,7 +254,7 @@ export function renderLead() {
   if (!root) return;
   const { engine } = store;
   const ctx = getContext();
-  const mine = partyMembers(ctx);
+  const mine = partyMembers(ctx, { evolve: false });   // 당장의 배틀이므로 진화 전 포켓몬은 지금 모습 그대로
   const foes = store.opponents.map(id => ctx.prep(engine.byId.get(id)));
 
   oppEl.innerHTML = foes.length

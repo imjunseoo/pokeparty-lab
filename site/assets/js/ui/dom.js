@@ -5,10 +5,14 @@ export const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ESC[c]);
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 
-/** 받침에 따라 조사 선택: josa('누오', '을를') → '누오를' */
+/** 받침에 따라 조사 선택: josa('누오', '을를') → '누오를', josa('리자몽', '으로') → '리자몽으로' (ㄹ 받침은 '로') */
 export function josa(word, pair) {
-  const [withJong, withoutJong] = { 을를: ['을', '를'], 와과: ['과', '와'], 이가: ['이', '가'], 은는: ['은', '는'] }[pair];
   const code = word.charCodeAt(word.length - 1) - 0xac00;
+  if (pair === '으로') {
+    if (code < 0 || code > 11171) return `${word}(으)로`;
+    return word + (code % 28 && code % 28 !== 8 ? '으로' : '로');
+  }
+  const [withJong, withoutJong] = { 을를: ['을', '를'], 와과: ['과', '와'], 이가: ['이', '가'], 은는: ['은', '는'] }[pair];
   if (code < 0 || code > 11171) return `${word}${withJong}(${withoutJong})`;
   return word + (code % 28 ? withJong : withoutJong);
 }

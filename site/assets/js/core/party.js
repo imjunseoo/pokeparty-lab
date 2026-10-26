@@ -41,13 +41,38 @@ export function gamePool(engine, { data, map = 'tour', legends = false }) {
   return [...weight].map(([id, w]) => ({ mon: engine.byId.get(id), w })).filter(e => e.mon);
 }
 
+/** 진화 전 포켓몬의 최종 진화 후보 [{ mon, item(진화 도구 slug 또는 null) }] (게임 진화 데이터 기준, 최종 진화면 []) */
+export function finalsOf(engine, data, mon) {
+  return (data?.evo?.[mon.id] || []).map(([id, item]) => ({ mon: engine.byId.get(id), item })).filter(x => x.mon);
+}
+
+/**
+ * 잡을 수 있는 포켓몬 → 최종 진화 기준 후보. 토너먼트(Lv.75)까지 진화하므로 진화 전 포켓몬은 최종 진화로 평가하고,
+ * 가중치는 진화 갈래 수로 나눠 최종 진화에 모은다.
+ * @returns [{ mon(최종 진화), w, from: [진화 전 mon], direct(최종 진화를 바로 잡을 수 있는지) }]
+ */
+function evolvePool(engine, data, entries) {
+  const out = new Map();
+  const get = mon => out.get(mon.id) || out.set(mon.id, { mon, w: 0, from: [], direct: false }).get(mon.id);
+  for (const { mon, w } of entries) {
+    const finals = finalsOf(engine, data, mon);
+    if (!finals.length) { const e = get(mon); e.w += w; e.direct = true; continue; }
+    for (const f of finals) {
+      const e = get(f.mon);
+      e.w += w / finals.length;
+      if (!e.from.includes(mon)) e.from.push(mon);
+    }
+  }
+  return [...out.values()];
+}
+
 export function createContext(engine, { usage = null, filters = {}, game = null } = {}) {
   const { dex, types, tIdx } = engine;
   const umap = usage?.mons || {};
   const f = { game: 'all', legend: false, mega: !!usage, minBst: 450, ...filters };
   const dexGame = f.game !== 'all' ? dex.games[f.game] : null;
   const gameSet = dexGame ? new Set(dexGame.species) : null;
-  const gameEntries = game ? gamePool(engine, game) : null;
+  const gameEntries = game ? evolvePool(engine, game.data, gamePool(engine, game)) : null;
 
   let candidates;
   if (gameEntries) {
@@ -94,13 +119,19 @@ export function createContext(engine, { usage = null, filters = {}, game = null 
   const changed = game?.data.changed || {};
   ctx.stats = mon => changed[mon.id]?.st || mon.st;
 
-  ctx.prep = (mon, { ability, tera = null, locked = false } = {}) => {
+  /**
+   * 분석용 멤버/후보. mon = 실제로 싸우는 모습(최종 진화·메가진화), base = 잡는(가진) 모습.
+   * atk: 입력한 세팅의 공격 기술 타입 (없으면 자속 타입으로 공격 범위를 잰다)
+   * from/direct: 진화 전 모습으로 잡는 후보, stone: 메가스톤 (메가진화 룰)
+   */
+  ctx.prep = (mon, { ability, tera = null, locked = false, atk = null, base = null, from = [], direct = true, stone = null } = {}) => {
     const u = umap[mon.id];
     const ab = ability === undefined ? engine.defaultAbility(mon, u) : ability;
     const def = engine.defenseProfile(mon, { ability: ab, tera });
     const stabs = engine.stabTypes(mon, tera);
+    const atkTypes = atk?.length ? atk : stabs;
     const off = new Float32Array(meta.length);
-    for (const s of stabs) {
+    for (const s of atkTypes) {
       const row = eff[tIdx[s]];
       for (let q = 0; q < meta.length; q++) if (row[q] > off[q]) off[q] = row[q];
     }
@@ -108,10 +139,22 @@ export function createContext(engine, { usage = null, filters = {}, game = null 
     const indiv = usage
       ? clamp((total - 500) / 100, -1, 1) * 0.25 + 0.55 * Math.log1p(u?.u || 0)
       : clamp((total - 500) / 100, -1.5, 1.2) * 0.9;
-    return { mon, id: mon.id, sp: mon.sp, ability: ab, tera, locked, def, stabs, off, indiv, u, mega: !!mon.mega };
+    return {
+      mon, id: mon.id, sp: mon.sp, ability: ab, tera, locked, def, stabs, atk: atkTypes, moves: !!atk?.length, off, indiv, u,
+      mega: !!mon.mega, base: base || mon, from, direct, stone,
+    };
   };
 
-  ctx.pool = candidates.map(mon => ctx.prep(mon));
+  // 후보: 게임 모드는 최종 진화 기준 + 메가진화 룰이면 메가스톤을 살 수 있는 포켓몬의 메가진화 모습도 (파티당 1마리)
+  const entries = gameEntries || candidates.map(mon => ({ mon, from: [], direct: true }));
+  ctx.pool = entries.map(e => ctx.prep(e.mon, { from: e.from, direct: e.direct }));
+  ctx.megaRule = !!game && (game.rule?.uses || []).includes('mega');
+  if (ctx.megaRule) {
+    for (const e of entries) for (const [mid, stone] of game.data.megas[e.mon.id] || []) {
+      const mega = engine.byId.get(mid);
+      if (mega) ctx.pool.push(ctx.prep(mega, { base: e.mon, from: e.from, direct: e.direct, stone }));
+    }
+  }
   return ctx;
 }
 
@@ -235,6 +278,54 @@ export function explainSlot(ctx, members, i) {
   return explain(ctx, stateOf(ctx, members.filter((_, j) => j !== i)), members[i]);
 }
 
+/** 지금 파티에 후보 c 를 넣으면 무엇이 좋아지는지 (추천 예시 코멘트용) */
+export const explainCandidate = (ctx, members, c) => explain(ctx, stateOf(ctx, members), c);
+
+/**
+ * 야생 칸 후보를 잡아 파티에 넣었을 때의 점수 상승폭. 파티가 6마리면 가장 덜 아까운 멤버와 바꾼 경우로 잰다.
+ * @returns { gain, replace: 바꿀 멤버 번호 | null, blocked: 같은 종이 이미 있거나 메가진화가 이미 있음, reasons }
+ */
+export function catchValue(ctx, members, c, { prepared = prepareCatch(ctx, members), reasons = true } = {}) {
+  const { st, base, rests } = prepared;
+  if (st.species.has(c.sp)) return { gain: -Infinity, replace: null, blocked: true, reasons: [] };   // 같은 종이 이미 있음
+  if (members.length < 6) {
+    if (!allowed(st, c)) return { gain: -Infinity, replace: null, blocked: true, reasons: [] };
+    return { gain: scoreWith(ctx, st, c) - base, replace: null, blocked: false, reasons: reasons ? explain(ctx, st, c) : [] };
+  }
+  let best = null;
+  rests.forEach((rest, i) => {
+    if (!allowed(rest, c)) return;
+    const gain = scoreWith(ctx, rest, c) - base;
+    if (!best || gain > best.gain) best = { gain, replace: i, rest };
+  });
+  if (!best) return { gain: -Infinity, replace: null, blocked: true, reasons: [] };
+  return { gain: best.gain, replace: best.replace, blocked: false, reasons: reasons ? explain(ctx, best.rest, c) : [] };
+}
+
+/**
+ * 멤버마다 파티 안에서의 몫: 그 멤버를 빼면 잃는 점수(종족값 몫 indiv 는 따로) · 빼면 약점이 몰리는 타입 · 보완 이유
+ * @returns [{ synergy, indiv, exposed: [타입], reasons }]
+ */
+export function memberValues(ctx, members) {
+  const { types } = ctx.engine;
+  const st = stateOf(ctx, members);
+  const base = totalScore(ctx, st);
+  return members.map((m, i) => {
+    const rest = stateOf(ctx, members.filter((_, j) => j !== i));
+    const exposed = types.filter((_, a) => rest.weak[a] - rest.resist[a] >= 2 && st.weak[a] - st.resist[a] < 2);
+    return { synergy: base - totalScore(ctx, rest) - m.indiv, indiv: m.indiv, exposed, reasons: explain(ctx, rest, m) };
+  });
+}
+
+/** 후보를 많이 잴 때 쓰는 미리 계산 (지금 파티 상태 · 한 마리씩 뺀 상태) */
+export function prepareCatch(ctx, members) {
+  const st = stateOf(ctx, members);
+  return {
+    st, base: totalScore(ctx, st),
+    rests: members.length >= 6 ? members.map((_, i) => stateOf(ctx, members.filter((__, j) => j !== i))) : [],
+  };
+}
+
 /** 후보 c 가 나머지 파티 rest 에 무엇을 보완하는지 설명 */
 export function explain(ctx, rest, c) {
   const { engine } = ctx;
@@ -249,8 +340,8 @@ export function explain(ctx, rest, c) {
   fixes.sort((x, y) => y.sev - x.sev || x.mult - y.mult);
   for (const fx of fixes.slice(0, 3)) out.push({ kind: 'def', type: fx.type, mult: fx.mult, sev: fx.sev });
   // 공격: 기존 자속으로 효과 굉장을 못 주던 단일 타입
-  const restBest = types.map((_, d) => Math.max(0, ...rest.members.flatMap(m => m.stabs.map(s => chart[tIdx[s]][d]))));
-  const gains = types.filter((_, d) => restBest[d] < 2 && Math.max(...c.stabs.map(s => chart[tIdx[s]][d])) >= 2);
+  const restBest = types.map((_, d) => Math.max(0, ...rest.members.flatMap(m => m.atk.map(s => chart[tIdx[s]][d]))));
+  const gains = types.filter((_, d) => restBest[d] < 2 && Math.max(...c.atk.map(s => chart[tIdx[s]][d])) >= 2);
   if (gains.length) out.push({ kind: 'off', types: gains.slice(0, 4) });
   const covGain = coverage(ctx, rest, c) - coverage(ctx, rest);
   if (covGain >= 0.03) out.push({ kind: 'cov', value: covGain });
@@ -266,6 +357,9 @@ export function explain(ctx, rest, c) {
   }
   // 상성 보완 이유가 없으면 능력치(종족값)로 뽑힌 것
   if (!out.some(r => r.kind === 'def' || r.kind === 'off' || r.kind === 'cov')) out.push({ kind: 'bst', value: engine.bst(c.mon) });
+  // 게임 룰·진화: 메가진화로 싸우는 후보, 진화 전 모습으로 잡는 후보
+  if (c.stone) out.push({ kind: 'mega', stone: c.stone, base: c.base, value: engine.bst(c.mon) });
+  if (c.from?.length && !c.direct) out.push({ kind: 'evo', from: c.from });
   // 경고: 이 포켓몬을 넣으면 같은 약점이 3마리 이상
   types.forEach((t, a) => {
     if (c.def[a] > 1 && rest.weak[a] + 1 >= 3) out.push({ kind: 'warn', type: t, count: rest.weak[a] + 1 });
@@ -290,7 +384,7 @@ export function analyze(ctx, members) {
     let best = 0;
     const by = [];
     members.forEach((m, i) => {
-      const x = Math.max(...m.stabs.map(s => chart[tIdx[s]][di]));
+      const x = Math.max(...m.atk.map(s => chart[tIdx[s]][di]));
       if (x > best) { best = x; by.length = 0; by.push(i); } else if (x === best) by.push(i);
     });
     return { type: d, best, by };
@@ -342,7 +436,7 @@ export function findCounters(ctx, target, { ability = null, tera = null } = {}, 
   const tStabs = engine.stabTypes(target, tera).map(s => engine.tIdx[s]);
   return ctx.pool.filter(c => c.sp !== target.sp).map(c => {
     let off = 0, offType = null;
-    for (const s of c.stabs) { const x = prof[engine.tIdx[s]]; if (x > off) { off = x; offType = s; } }
+    for (const s of c.atk) { const x = prof[engine.tIdx[s]]; if (x > off) { off = x; offType = s; } }
     const def = Math.max(...tStabs.map(a => c.def[a]));
     const score = Math.log2(Math.max(off, 0.25)) * 1.6 - Math.log2(Math.max(def, 0.125)) * 1.1 + c.indiv * 0.4;
     return { c, off, offType, def, score };
@@ -368,7 +462,7 @@ export function recommendTypes(ctx, members, { limit = 6 } = {}) {
   // 파티가 아직 못 받아내는(약점 우세) 공격 타입, 자속으로 효과 굉장을 못 주는 타입
   const exposed = types.map((t, a) => ({ t, sev: st.weak[a] - st.resist[a] + (st.resist[a] === 0 && st.members.length >= 2 ? 0.5 : 0) }))
     .filter(x => x.sev > 0).sort((a, b) => b.sev - a.sev);
-  const restBest = types.map((_, d) => Math.max(0, ...st.members.flatMap(m => m.stabs.map(s => chart[tIdx[s]][d]))));
+  const restBest = types.map((_, d) => Math.max(0, ...st.members.flatMap(m => m.atk.map(s => chart[tIdx[s]][d]))));
   return [...groups].map(([type, list]) => {
     list.sort((a, b) => b.gain - a.gain);
     const top = list.slice(0, 3);
@@ -400,7 +494,7 @@ export function leadAnalysis(ctx, mine, foes, { double = false } = {}) {
   const rows = mine.map(m => {
     const cells = foes.map(o => {
       let atk = 0, atkType = null;
-      for (const s of m.stabs) { const x = o.def[tIdx[s]]; if (x > atk) { atk = x; atkType = s; } }
+      for (const s of m.atk) { const x = o.def[tIdx[s]]; if (x > atk) { atk = x; atkType = s; } }
       let recv = 0, recvType = null;
       for (const s of o.stabs) { const x = m.def[tIdx[s]]; if (x > recv) { recv = x; recvType = s; } }
       const faster = spe(m) > spe(o) ? 1 : spe(m) === spe(o) ? 0.5 : 0;

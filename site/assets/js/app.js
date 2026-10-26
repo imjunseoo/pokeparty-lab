@@ -6,11 +6,13 @@ import {
 import { initMatchup, showMatchup, renderMatchup } from './views/matchup.js';
 import { initParty, renderParty } from './views/party.js';
 import { initLead, renderLead } from './views/lead.js';
+import { initCatch, renderCatch } from './views/catch.js';
+import { initBoard, renderBoard } from './views/board.js';
 import { initChart } from './views/chart.js';
 import { $, esc, toast } from './ui/dom.js';
 
-const TABS = ['matchup', 'party', 'lead', 'chart'];
-const TITLES = { party: '파티 추천', lead: '선봉 추천', chart: '타입 상성표' };
+const TABS = ['matchup', 'party', 'catch', 'board', 'lead', 'chart'];
+const TITLES = { party: '파티 추천', catch: '포획 추천', board: '칸 추천', lead: '선봉 추천', chart: '타입 상성표' };
 let current = null;
 
 async function fetchJson(url) {
@@ -33,6 +35,8 @@ async function boot() {
     initMatchup($('#view-matchup'));
     initParty($('#view-party'));
     initLead($('#view-lead'));
+    initCatch($('#view-catch'));
+    initBoard($('#view-board'));
     initChart($('#view-chart'));
     setupModeSelect();
     setupTheme();
@@ -41,6 +45,8 @@ async function boot() {
       if (current === 'matchup') renderMatchup();
       if (current === 'party') renderParty();
       if (current === 'lead') renderLead();
+      if (current === 'catch') renderCatch();
+      if (current === 'board') renderBoard();
       renderFooter();
     });
     window.addEventListener('hashchange', route);
@@ -76,6 +82,10 @@ function route() {
     const shared = arg && decodeIds(decodeURIComponent(arg));
     if (shared?.length && arg !== store.opponents.join(',')) update(s => { s.opponents = shared; });
     else renderLead();
+  } else if (tab === 'catch') {
+    renderCatch();
+  } else if (tab === 'board') {
+    renderBoard();
   }
   if (changed && tab !== 'matchup') window.scrollTo({ top: 0 });
 }

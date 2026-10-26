@@ -1,7 +1,8 @@
 // 앱 상태 (데이터, 데이터 기준, 게임 설정, 파티, 상대 파티) + localStorage 저장
 import { createEngine } from './core/engine.js';
 import { createSearch } from './core/search.js';
-import { createContext } from './core/party.js';
+import { createContext, finalsOf } from './core/party.js';
+import { createMoveBook, createBuilder, NATURES } from './core/build.js';
 import { josa, storage } from './ui/dom.js';
 
 export const TYPE_MODE = 'type';
@@ -15,14 +16,19 @@ export const store = {
   usage: null,      // 현재 포맷의 실전 데이터 (타입·게임 모드면 null)
   sets: null,       // 전체 포켓몬 추천 세팅 (sets.json, 부팅 후 따로 로드)
   gameData: null,   // 「포켓몬 파티!」에서 뽑은 출현·아이템·룰 데이터
+  moves: null,      // 게임 기술 표 + 습득표 (moves.json, 내 세팅을 쓸 때만 로드) → createMoveBook
   mode: TYPE_MODE,
   filters: { game: 'all', legend: false, mega: false, minBst: 450, usageMega: true },
   game: { map: 'tour', rule: 'normal', battle: 'single', legends: false },
-  party: [],        // [{ id, ability, tera, picked }]
+  party: [],        // [{ id, ability, tera, picked, evo(진화 목표 id), mega(메가진화 폼 id), set(내 세팅) }]
   opponents: [],    // 선봉 추천용 상대 파티 [id]
+  wild: [],         // 포획 추천: 야생 칸에서 나온 후보 [id] (최대 3)
+  ball: 'poke',     // 포획 추천: 지금 쓰는 볼 (라운드에 따라 바뀜)
+  board: { pos: {}, dice: null, gate: 'off', heal: false },   // 칸 추천: 맵마다 지금 칸, 주사위, 메이즈 스위치, 회복 필요
   recent: [],
 };
 
+const DICE_OK = d => Number.isInteger(d) && d >= 1 && d <= 10;
 const listeners = new Set();
 const usageCache = new Map();
 let ctxCache = null;
@@ -41,6 +47,15 @@ export function initStore(dex, usageIndex, gameData) {
   store.game = { ...store.game, ...storage.get('ppl.game', {}) };
   store.party = sanitizeParty(storage.get('ppl.party', []));
   store.opponents = sanitizeIds(storage.get('ppl.opponents', []));
+  store.wild = sanitizeIds(storage.get('ppl.wild', [])).slice(0, 3);
+  store.ball = ['poke', 'great', 'ultra'].includes(storage.get('ppl.ball', 'poke')) ? storage.get('ppl.ball', 'poke') : 'poke';
+  const board = storage.get('ppl.board', {});
+  store.board = {
+    pos: board.pos && typeof board.pos === 'object' ? board.pos : {},
+    dice: DICE_OK(board.dice) ? board.dice : null,
+    gate: board.gate === 'on' ? 'on' : 'off',
+    heal: !!board.heal,
+  };
   store.recent = storage.get('ppl.recent', []).filter(id => store.engine.byId.has(id)).slice(0, 8);
 }
 
@@ -53,6 +68,9 @@ function persist() {
   storage.set('ppl.game', store.game);
   storage.set('ppl.party', store.party);
   storage.set('ppl.opponents', store.opponents);
+  storage.set('ppl.wild', store.wild);
+  storage.set('ppl.ball', store.ball);
+  storage.set('ppl.board', store.board);
   storage.set('ppl.recent', store.recent);
 }
 
@@ -96,6 +114,48 @@ export function loadSets() {
   return setsPromise;
 }
 
+let movesPromise = null;
+/** 게임 기술 표·습득표 (약 70KB gzip): 내 세팅·최선 세팅을 보여 줄 때 받아서 도착하면 화면을 다시 그린다 */
+export function loadMoves() {
+  movesPromise ||= fetch('data/game/moves.json')
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(data => { update(s => { s.moves = createMoveBook(data); }); return store.moves; })
+    .catch(err => { movesPromise = null; console.warn('기술 데이터 로드 실패', err); return null; });
+  return movesPromise;
+}
+
+/** 이 룰에서 손에 넣을 수 있는 지닌 도구 */
+export function allowedItems(rule = gameRule()) {
+  const it = store.gameData?.items;
+  if (!it) return null;
+  const uses = rule?.uses || [];
+  return new Set([...it.battle, ...it.berry, ...it.signature,
+    ...(uses.includes('mega') ? it.mega : []), ...(uses.includes('z') ? it.z : []),
+    ...(uses.includes('tera') ? it.tera : []), ...(uses.includes('dynamax') ? it.dynamax : [])]);
+}
+
+let builderCache = null, builderKey = '';
+/** 세팅 평가기 (게임 모드 + 기술 데이터가 있을 때). 데이터 기준·배틀 방식·룰이 바뀌면 새로 만든다 */
+export function getBuilder() {
+  if (!isGameMode() || !store.moves) return null;
+  const ctx = getContext();
+  const key = `${ctxKey}|${store.game.battle}|${gameRule()?.key}|${!!store.sets}`;
+  if (key !== builderKey || !builderCache) {
+    builderCache = createBuilder(ctx, store.moves, {
+      level: store.gameData.finalLevel, battle: store.game.battle, sets: store.sets, items: allowedItems(),
+    });
+    builderKey = key;
+  }
+  return builderCache;
+}
+
+/** 내 세팅의 공격 기술 타입 (기술 데이터가 없거나 공격 기술이 없으면 null → 자속 타입으로 분석) */
+function attackTypes(set) {
+  if (!set?.mv?.length || !store.moves) return null;
+  const types = [...new Set(set.mv.map(s => store.moves.bySlug.get(s)).filter(mv => mv && mv.cat > 0).map(mv => mv.type))];
+  return types.length ? types : null;
+}
+
 export async function setMode(mode) {
   store.mode = mode;
   try {
@@ -113,8 +173,9 @@ export function getContext() {
   let opts, key;
   if (isGameMode()) {
     const { map, legends } = store.game;
-    opts = { game: { data: store.gameData, map, legends } };
-    key = `game|${map}|${legends}`;
+    const rule = gameRule();
+    opts = { game: { data: store.gameData, map, legends, rule } };
+    key = `game|${map}|${legends}|${rule?.key}`;
   } else {
     const filters = store.usage ? { mega: f.usageMega } : { game: f.game, legend: f.legend, mega: f.mega, minBst: f.minBst };
     opts = { usage: store.usage, filters };
@@ -127,9 +188,50 @@ export function getContext() {
   return ctxCache;
 }
 
-/** 저장된 파티 → 분석용 멤버 */
-export function partyMembers(ctx = getContext()) {
-  return store.party.map(m => ctx.prep(store.engine.byId.get(m.id), { ability: m.ability || undefined, tera: m.tera || null }));
+/** 진화 전 포켓몬의 최종 진화 후보 [{ mon, item }] (종족값 높은 순, 최종 진화면 []) */
+export const evoOptions = mon => finalsOf(store.engine, store.gameData, mon)
+  .sort((a, b) => store.engine.effectiveBst(b.mon) - store.engine.effectiveBst(a.mon));
+/** 지금 게임 룰에서 쓸 수 있는 메가진화 [[메가 폼 id, 메가스톤]] (게임 모드 + 메가 룰일 때만) */
+export const megaOptions = mon => (isGameMode() && gameRule()?.uses.includes('mega') ? store.gameData.megas[mon.id] || [] : []);
+
+/** 파티 멤버가 실제로 싸우는 모습: 최종 진화(evolve) → 메가진화. { mon, caught, stone } */
+export function battleForm(m, { evolve = true } = {}) {
+  const caught = store.engine.byId.get(m.id);
+  let mon = caught;
+  if (evolve) {
+    const finals = evoOptions(caught);
+    mon = (finals.find(f => f.mon.id === m.evo) || finals[0])?.mon || caught;
+  }
+  const mega = megaOptions(mon).find(([id]) => id === m.mega);
+  return mega ? { mon: store.engine.byId.get(mega[0]), caught, stone: mega[1] } : { mon, caught, stone: null };
+}
+
+/** 야생 후보(잡는 모습) → 비교할 모습들: 최종 진화(갈래마다) + 메가진화 룰이면 메가진화 모습 */
+export function catchForms(ctx, mon) {
+  const finals = evoOptions(mon).map(f => f.mon);
+  const out = [];
+  for (const b of finals.length ? finals : [mon]) {
+    const route = { base: b, from: b === mon ? [] : [mon], direct: b === mon };
+    out.push(ctx.prep(b, route));
+    for (const [mid, stone] of megaOptions(b)) {
+      const mega = store.engine.byId.get(mid);
+      if (mega) out.push(ctx.prep(mega, { ...route, stone }));
+    }
+  }
+  return out;
+}
+
+/**
+ * 저장된 파티 → 분석용 멤버 (진화 전 포켓몬은 최종 진화 기준, 메가진화를 켜면 메가 모습).
+ * evolve: false 면 지금 모습 그대로 (선봉 추천처럼 당장의 배틀)
+ */
+export function partyMembers(ctx = getContext(), { evolve = true } = {}) {
+  const { engine } = store;
+  return store.party.map(m => {
+    const { mon, caught, stone } = battleForm(m, { evolve });
+    const ability = engine.abilitiesOf(mon).includes(m.ability) ? m.ability : undefined;
+    return ctx.prep(mon, { ability, tera: m.tera || null, base: caught, stone, atk: attackTypes(m.set) });
+  });
 }
 
 export function addRecent(id) {
@@ -155,24 +257,44 @@ function sanitizeParty(list) {
     const mon = engine.byId.get(+m?.id);
     if (!mon || species.has(mon.sp) || out.length >= 6) continue;
     species.add(mon.sp);
+    const finals = store.gameData ? finalsOf(engine, store.gameData, mon) : [];
+    const evo = finals.some(f => f.mon.id === +m.evo) ? +m.evo : null;
+    const formIds = new Set([mon.id, ...finals.map(f => f.mon.id)]);
+    const megas = [...formIds].flatMap(id => store.gameData?.megas[id] || []);
     out.push({
       id: mon.id,
-      ability: engine.abilitiesOf(mon).includes(m.ability) ? m.ability : null,
+      ability: m.ability && [...formIds].some(id => engine.abilitiesOf(engine.byId.get(id)).includes(m.ability)) ? m.ability : null,
       tera: dex.typeNames[m.tera] ? m.tera : null,
       picked: !!m.picked,
+      evo,
+      mega: megas.some(([id]) => id === +m.mega) ? +m.mega : null,
+      set: sanitizeSet(m.set),
     });
   }
   return out;
 }
 
+/** 내 세팅 { lv, mv: [기술 slug ≤4], it: 도구 slug, na: 성격, iv: [6 × 31이면 true] } (특성은 멤버의 ability) */
+export function sanitizeSet(set) {
+  if (!set || typeof set !== 'object') return null;
+  const slug = s => typeof s === 'string' && /^[a-z0-9-]+$/.test(s);
+  return {
+    lv: Math.min(100, Math.max(1, Math.round(+set.lv) || store.gameData?.finalLevel || 75)),
+    mv: [...new Set((Array.isArray(set.mv) ? set.mv : []).filter(slug))].slice(0, 4),
+    it: slug(set.it) ? set.it : null,
+    na: NATURES[set.na] ? set.na : null,
+    iv: Array.from({ length: 6 }, (_, k) => !!set.iv?.[k]),
+  };
+}
+
 const sanitizeIds = list => (Array.isArray(list) ? list : []).map(Number).filter(id => store.engine.byId.has(id)).slice(0, 6);
 export const decodeIds = text => sanitizeIds(String(text).split(','));
 
-/** 파티에 추가. 실패 사유 문자열 또는 null */
-export function addToParty(mon, { picked = false } = {}) {
+/** 파티에 추가 (evo: 진화 목표 id, mega: 메가진화 폼 id). 실패 사유 문자열 또는 null */
+export function addToParty(mon, { picked = false, evo = null, mega = null } = {}) {
   if (store.party.length >= 6) return '파티가 가득 찼어요 (최대 6마리)';
   if (store.party.some(m => store.engine.byId.get(m.id).sp === mon.sp)) return `${josa(mon.ko, '와과')} 같은 종이 이미 파티에 있어요`;
-  update(s => { s.party.push({ id: mon.id, ability: null, tera: null, picked }); });
+  update(s => { s.party.push({ id: mon.id, ability: null, tera: null, picked, evo, mega, set: null }); });
   return null;
 }
 
