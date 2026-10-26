@@ -224,10 +224,24 @@ function build({ dat, dex, sets, T }) {
     const party = partyItems.find(p => p.icon === sym);
     itemInfo[slug] = [cat, price, ...(party ? [party.name, party.desc] : [])];
   }
-  // 토너먼트 직전 상점: 파티 아이템 키 → 게임 표시 이름
-  const tourneyShop = [...block(shopSrc, 'TOURNEY_SHOP_ITEMS').matchAll(/:(\w+)/g)].map(([, key]) => ({
-    key, name: itemSrc.match(new RegExp(`key:\\s*:${key}\\b[^}]*?name:\\s*"([^"]+)"`))?.[1] || key,
-  }));
+  // 토너먼트 직전 상점(TOURNEY_SHOP_ITEMS 중 판마다 3개 진열, 종류마다 1번): 파티 아이템 키 → 게임 표시 이름 · 설명 ·
+  //   마지막 상점 가격(TOURNEY_SHOP_PRICE / _PRICES) · 일반 상점의 파티 아이템 칸에 나올 때 가격(등급 · 직접 지정, 안 팔면 null)
+  const partyPrice = { low: priceOf('PARTY_ITEM_PRICE_LOW'), mid: priceOf('PARTY_ITEM_PRICE_MID'), high: priceOf('PARTY_ITEM_PRICE_HIGH') };
+  const shopExcluded = new Set([...block(shopSrc, 'SHOP_EXCLUDED_PARTY_ITEMS').matchAll(/:(\w+)/g)].map(m => m[1]));
+  const tourneyPrices = Object.fromEntries([...block(shopSrc, 'TOURNEY_SHOP_PRICES', '{').matchAll(/(\w+):\s*(\d+)/g)].map(m => [m[1], +m[2]]));
+  const partyOverride = Object.fromEntries([...block(shopSrc, 'PARTY_ITEM_PRICE_OVERRIDE', '{').matchAll(/(\w+):\s*(\d+)/g)].map(m => [m[1], +m[2]]));
+  const tierSrc = block(shopSrc, 'PARTY_ITEM_TIERS', '{');
+  const partyTier = key => tierSrc.match(new RegExp(`\\b${key}:\\s*:(low|mid|high)\\b`))?.[1] || 'mid';
+  const tourneyShop = [...block(shopSrc, 'TOURNEY_SHOP_ITEMS').matchAll(/:(\w+)/g)].map(([, key]) => {
+    const p = partyItems.find(x => x.key === key);
+    return {
+      key, name: p?.name || key, desc: p?.desc || '',
+      price: tourneyPrices[key] || priceOf('TOURNEY_SHOP_PRICE'),
+      shop: shopExcluded.has(key) ? null : partyOverride[key] || partyPrice[partyTier(key)],
+    };
+  });
+  const tourneyShopCount = priceOf('TOURNEY_SHOP_COUNT');
+  const evoItemPrice = priceOf('EVOLUTION_ITEM_PRICE');
   const levelTable = (block(lvSrc, 'LEVEL_TABLE').replace(/#.*$/gm, '').match(/\d+/g) || []).map(Number);
 
   // ── 기술 습득: 추천 세팅의 기술 중 게임에서 배울 수 없는 것 표시 ──
@@ -358,6 +372,8 @@ function build({ dat, dex, sets, T }) {
     finalLevel: levelTable[levelTable.length - 1] || 75,
     levelTable,
     tourneyShop,
+    tourneyShopCount,
+    evoItemPrice,
     maps,
     starters,
     areas,

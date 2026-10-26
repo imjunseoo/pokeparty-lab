@@ -452,7 +452,7 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
       ivs.push({ stat: i, gain: top - sc({ ...best, iv }) });
     }
     ivs.sort((a, b) => b.gain - a.gain);
-    if (ivs.length) steps.push({ kind: 'iv', stats: ivs.map(x => x.stat), gain: ivs.reduce((a, x) => a + x.gain, 0) });
+    if (ivs.length) steps.push({ kind: 'iv', stats: ivs.map(x => x.stat), gains: ivs.map(x => x.gain), gain: ivs.reduce((a, x) => a + x.gain, 0) });
     return steps.filter(s => s.gain > 0.05).sort((a, b) => b.gain - a.gain);
   }
 

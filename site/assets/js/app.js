@@ -1,4 +1,4 @@
-// 진입점: 데이터 로드 → 화면 초기화 → 해시 라우팅 (#/matchup/<slug>, #/party/<파티>, #/lead/<상대>, #/chart)
+// 진입점: 데이터 로드 → 화면 초기화 → 해시 라우팅 (#/matchup/<slug>, #/party/<파티>, #/strategy, #/lead/<상대>, #/chart)
 import {
   store, initStore, subscribe, setMode, loadUsage, loadSets, decodeParty, decodeIds, encodeParty, update, usageInfo,
   isGameMode, TYPE_MODE, GAME_MODE,
@@ -8,11 +8,12 @@ import { initParty, renderParty } from './views/party.js';
 import { initLead, renderLead } from './views/lead.js';
 import { initCatch, renderCatch } from './views/catch.js';
 import { initStarter, renderStarter } from './views/starter.js';
+import { initStrategy, renderStrategy } from './views/strategy.js';
 import { initChart } from './views/chart.js';
 import { $, esc, toast } from './ui/dom.js';
 
-const TABS = ['matchup', 'party', 'catch', 'starter', 'lead', 'chart'];
-const TITLES = { party: '파티 추천', catch: '포획 추천', starter: '스타팅 추천', lead: '선봉 추천', chart: '타입 상성표' };
+const TABS = ['matchup', 'party', 'strategy', 'catch', 'starter', 'lead', 'chart'];
+const TITLES = { party: '파티 추천', strategy: '칸별 전략', catch: '포획 추천', starter: '스타팅 추천', lead: '선봉 추천', chart: '타입 상성표' };
 let current = null;
 
 async function fetchJson(url) {
@@ -37,6 +38,7 @@ async function boot() {
     initLead($('#view-lead'));
     initCatch($('#view-catch'));
     initStarter($('#view-starter'));
+    initStrategy($('#view-strategy'));
     initChart($('#view-chart'));
     setupModeSelect();
     setupTheme();
@@ -47,6 +49,7 @@ async function boot() {
       if (current === 'lead') renderLead();
       if (current === 'catch') renderCatch();
       if (current === 'starter') renderStarter();
+      if (current === 'strategy') renderStrategy();
       renderFooter();
     });
     window.addEventListener('hashchange', route);
@@ -86,6 +89,8 @@ function route() {
     renderCatch();
   } else if (tab === 'starter') {
     renderStarter();
+  } else if (tab === 'strategy') {
+    renderStrategy();
   }
   if (changed && tab !== 'matchup') window.scrollTo({ top: 0 });
 }

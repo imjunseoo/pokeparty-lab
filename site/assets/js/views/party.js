@@ -24,6 +24,7 @@ let root, slotsEl, recEl, analysisEl, optionsEl;
 let optionsOpen = null;   // null = 모드 기본값 (게임 모드는 펼침)
 let deepOpen = false;
 let editing = null;       // 내 세팅 입력 폼을 연 멤버 번호
+let scrollToEditor = false;   // 다른 화면(칸별 전략)에서 "세팅 입력"으로 왔을 때 폼까지 스크롤
 const recOffset = new Map();   // 타입별 "다른 예시 보기" 위치
 
 export function initParty(el) {
@@ -161,6 +162,13 @@ function autofill() {
 }
 
 
+/** 다른 화면에서 멤버 i 의 내 세팅 입력 폼 열기 (다음에 그릴 때 폼까지 스크롤) */
+export function openSetEditor(i) {
+  editing = i;
+  scrollToEditor = true;
+  loadMoves();
+}
+
 export function renderParty() {
   if (!root) return;
   const ctx = getContext();
@@ -169,6 +177,10 @@ export function renderParty() {
   renderSlots(ctx, members);
   renderRec(ctx, members);
   renderAnalysis(ctx, members);
+  if (scrollToEditor && editing !== null) {
+    const form = root.querySelector(`[data-editor="${editing}"]`);
+    if (form) { scrollToEditor = false; requestAnimationFrame(() => form.scrollIntoView({ block: 'center' })); }
+  }
   // 주소창을 현재 파티로 동기화 (새로고침·공유 시 유지)
   const hash = store.party.length ? `#/party/${encodeParty(store.party)}` : '#/party';
   if (location.hash.startsWith('#/party') && location.hash !== hash) history.replaceState(null, '', hash);

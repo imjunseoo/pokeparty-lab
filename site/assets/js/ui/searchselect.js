@@ -73,9 +73,11 @@ export function bindSearchSelects(root) {
     box.querySelector('.ss-list').hidden = true;
     box.querySelector('.ss-input').setAttribute('aria-expanded', 'false');
   };
+  // 고르면 상자에서 ss-change 이벤트 (detail = 값): 고르자마자 다시 계산하는 화면용 (칸별 전략의 "나온 도구")
   const choose = (box, o) => {
     setSearchValue(box, o.value);
     close(box);
+    box.dispatchEvent(new CustomEvent('ss-change', { bubbles: true, detail: o.value }));
   };
   const move = (box, d) => {
     const st = state.get(box);
@@ -124,7 +126,10 @@ export function bindSearchSelects(root) {
     const box = boxOf(input);
     close(box);
     // 비우면 값도 비움(없음), 그 밖엔 고른 값의 이름으로 되돌림
-    if (!input.value.trim()) setSearchValue(box, '');
-    else setSearchValue(box, box.querySelector('input[type="hidden"]').value);
+    const had = box.querySelector('input[type="hidden"]').value;
+    if (!input.value.trim()) {
+      setSearchValue(box, '');
+      if (had) box.dispatchEvent(new CustomEvent('ss-change', { bubbles: true, detail: '' }));
+    } else setSearchValue(box, had);
   });
 }
