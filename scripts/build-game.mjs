@@ -8,11 +8,13 @@
  *
  *   node scripts/build-game.mjs --game "C:/.../Pokemon Party!_20261026"
  */
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
 import { join } from 'node:path';
 import { DATA_DIR, loadTables, toId, writeJson } from './lib/pokeapi.mjs';
 import { loadMarshal } from './lib/marshal.mjs';
+import { decodePng } from './lib/png.mjs';
+import { ICON_FRAME, ICON_GRID, iconCells, packCells, cellsDiff, composeHud, hudTemplate } from './lib/icons.mjs';
 
 const args = process.argv.slice(2);
 const GAME = args.includes('--game') ? args[args.indexOf('--game') + 1]
@@ -262,7 +264,42 @@ function build({ dat, dex, sets, T }) {
     illegal,
     changed,
   };
-  return writeJson(join(DATA_DIR, 'game', 'pokemon-party.json'), out).then(size => {
+  // ── 스크린샷 인식용 아이콘 특징값 (Graphics/Pokemon/Icons · Icons shiny, 메가 폼 제외 · 암컷 아이콘 포함) ──
+  // 아이콘의 두 번째 프레임은 첫 프레임을 위로 2px 옮긴 것이라 첫 프레임만 저장 (인식 때 위아래로 맞춰 봄)
+  let iconFail = 0;
+  const readIcons = dir => {
+    const list = [];
+    for (const file of existsSync(dir) ? readdirSync(dir) : []) {
+      const m = file.match(/^([A-Z0-9_]+?)(_female)?\.png$/);
+      const g = m && gameMon.get(m[1]);
+      if (!g || g.dex.mega || g.data.mega_stone) continue;
+      try {
+        const img = decodePng(readFileSync(join(dir, file)));
+        if (img.width < ICON_FRAME || img.height < ICON_FRAME) continue;
+        list.push({ file, id: g.dex.id, cells: iconCells(img, 0) });
+      } catch { iconFail++; }
+    }
+    return list;
+  };
+  const icons = readIcons(join(GAME, 'Graphics', 'Pokemon', 'Icons'));
+  // 이로치(색이 다른 포켓몬, 보드의 '반짝이는 사탕' 칸 등으로 생김): 일반 아이콘과 색이 거의 같은 것은 뺀다
+  const plain = new Map(icons.map(x => [x.file, x.cells]));
+  const shiny = readIcons(join(GAME, 'Graphics', 'Pokemon', 'Icons shiny')).filter(x => !plain.has(x.file) || cellsDiff(plain.get(x.file), x.cells) > 6);
+  // 보드 화면 고정 그림(상단 바 + 플레이어 패널 4장) → 위치 맞추기 템플릿 · 슬롯별 빈칸 배경
+  const uiDir = join(GAME, 'Graphics', 'UI', 'PokemonParty');
+  const panelFiles = [1, 2, 3, 4].map(i => join(uiDir, `PartyPlayer${i}.png`));
+  const hud = panelFiles.every(existsSync)
+    ? hudTemplate(composeHud(panelFiles.map(f => decodePng(readFileSync(f))), existsSync(join(uiDir, 'MainUI.png')) ? decodePng(readFileSync(join(uiDir, 'MainUI.png'))) : null))
+    : undefined;
+  const iconSize = icons.length
+    ? writeJson(join(DATA_DIR, 'game', 'icons.json'), {
+      grid: ICON_GRID, frame: ICON_FRAME, format: 'rgba4444',
+      icons: icons.map(x => [x.id, packCells(x.cells)]), shiny: shiny.map(x => [x.id, packCells(x.cells)]), hud,
+    })
+    : Promise.resolve('없음');
+
+  return Promise.all([writeJson(join(DATA_DIR, 'game', 'pokemon-party.json'), out), iconSize]).then(([size, isize]) => {
+    console.log(`✔ game/icons.json · 아이콘 ${icons.length}개 + 이로치 ${shiny.length}개 · HUD 템플릿 ${hud ? '있음' : '없음'}${iconFail ? ` (읽기 실패 ${iconFail})` : ''} · ${isize}`);
     const legends = Object.values(pool).filter(x => x.l).length;
     console.log(`✔ game/pokemon-party.json · v${version} · ${size}`);
     console.log(`  지역 ${areas.length}곳 (${areas.reduce((a, x) => a + x.mons.length, 0)}종) · 전체 풀 ${Object.keys(pool).length}종 (전설류 ${legends}) · 맵 ${maps.map(m => m.name).join('/')}`);

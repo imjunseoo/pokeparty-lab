@@ -528,6 +528,30 @@ button.type { border: 0; cursor: pointer; }
 .type-picker .type { opacity: .45; transition: opacity .12s, transform .12s; min-width: 60px; padding: 6px 10px; font-size: 13px; }
 .type-picker .type[aria-pressed="true"] { opacity: 1; transform: translateY(-1px); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text); }
 
+/* ───────── 스크린샷 입력 (선봉 추천) ───────── */
+.shot-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; }
+.card.dragging { outline: 2px dashed var(--info); outline-offset: -6px; background: var(--info-soft); }
+.shot-warn { margin: 0 0 12px; padding: 9px 12px; border-radius: 10px; background: var(--warn-soft); color: var(--warn); font-size: 13px; font-weight: 600; line-height: 1.5; }
+.shot-body { display: grid; grid-template-columns: minmax(0, 520px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.shot-preview { display: grid; gap: 6px; }
+.shot-preview canvas { display: block; max-width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); }
+.shot-preview canvas.cropping { cursor: crosshair; touch-action: none; box-shadow: 0 0 0 2px var(--gold); }
+.shot-rows { display: grid; gap: 8px; }
+.shot-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--surface-2); }
+.shot-row.me { opacity: .6; }
+.shot-label { display: grid; gap: 2px; font-size: 13px; font-weight: 800; }
+.shot-label em { font-style: normal; font-size: 11px; font-weight: 700; color: var(--info); }
+.shot-mons { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.shot-mon { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px 2px 2px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); font-size: 12.5px; }
+.shot-mon img, .shot-none { width: 32px; height: 32px; flex-shrink: 0; }
+.shot-none { display: grid; place-items: center; font-weight: 800; color: var(--faint); }
+.shot-mon.unsure { border-color: var(--warn); background: var(--warn-soft); }
+.shot-mon .select { padding: 3px 22px 3px 6px; font-size: 12.5px; background-position: right 6px center; }
+.shot-tag { font-style: normal; font-size: 10.5px; font-weight: 800; padding: 1px 5px; border-radius: 6px; background: var(--info-soft); color: var(--info); white-space: nowrap; }
+.shot-tag.faint { background: var(--danger-soft); color: var(--danger); }
+@media (max-width: 860px) { .shot-body { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) { .shot-row { grid-template-columns: minmax(0, 1fr) auto; } .shot-mons { grid-column: 1 / -1; grid-row: 2; } }
+
 /* ───────── 기타 ───────── */
 .boot { display: grid; place-items: center; gap: 14px; padding: 90px 0; color: var(--muted); }
 .boot-ball { width: 46px; height: 46px; border-radius: 50%; border: 4px solid var(--text); background: linear-gradient(var(--accent) 0 46%, var(--text) 46% 54%, #fff 54%); animation: spin 1s cubic-bezier(.5,.1,.5,.9) infinite; }

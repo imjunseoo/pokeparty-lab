@@ -1,12 +1,16 @@
 // 선봉 추천: 상대 파티(최대 6마리) 입력 → 내 파티에서 먼저 내보낼 포켓몬(더블이면 2마리) · 경계할 상대 · 대면표
+// 상대 파티는 검색, 이름 붙여넣기, 보드 화면 스크린샷(아이콘 인식)으로 입력할 수 있다.
 import { store, update, getContext, partyMembers, battleMode, isGameMode } from '../state.js';
 import { createPicker } from '../ui/picker.js';
 import { esc, on, toast, josa } from '../ui/dom.js';
 import { sprite, typeBadge, typeList, mult, ICONS } from '../ui/components.js';
 import { normalize } from '../core/search.js';
 import { leadAnalysis } from '../core/party.js';
+import { readImage, analyzeShot, drawPreview } from '../ui/shot.js';
 
-let root, oppEl, mineEl, resultEl;
+let root, oppEl, mineEl, resultEl, shotEl;
+// 스크린샷 인식 상태 (저장하지 않음): data 원본 픽셀, result 인식 결과, picks 사용자가 고친 칸, crop 영역 지정 모드
+const shot = { data: null, result: null, picks: {}, busy: false, crop: false, k: 1, drag: null };
 
 export function initLead(el) {
   root = el;
@@ -21,6 +25,11 @@ export function initLead(el) {
         <div class="card-head"><h3>상대 파티</h3><span class="sub">최대 6마리</span>
           <button class="btn sm ghost" type="button" data-act="opp-clear">비우기</button></div>
         <div id="l-picker"></div>
+        <div class="shot-tools" id="l-drop">
+          <label class="btn sm" for="l-shot-file">${ICONS.image}스크린샷으로 입력</label>
+          <input type="file" id="l-shot-file" accept="image/*" hidden>
+          <span class="note">보드 화면 스크린샷을 올리거나, 이 화면에서 <b>Ctrl+V</b>로 붙여넣거나, 여기로 끌어다 놓으세요</span>
+        </div>
         <div class="opp-list" id="l-opps"></div>
         <details class="paste">
           <summary>이름 여러 개 한 번에 입력</summary>
@@ -33,10 +42,12 @@ export function initLead(el) {
         <div id="l-mine"></div>
       </section>
     </div>
+    <section class="card shot-card" id="l-shot" hidden></section>
     <div id="l-result" class="view"></div>`;
   oppEl = root.querySelector('#l-opps');
   mineEl = root.querySelector('#l-mine');
   resultEl = root.querySelector('#l-result');
+  shotEl = root.querySelector('#l-shot');
 
   createPicker(root.querySelector('#l-picker'), {
     engine: store.engine, search: store.search,
@@ -55,6 +66,153 @@ export function initLead(el) {
     toast(missed.length ? `${added}마리 입력 · 못 찾은 이름: ${missed.join(', ')}` : `${added}마리를 입력했어요`);
   });
   on(root, 'click', '[data-go]', (e, el) => { e.preventDefault(); location.hash = `#/matchup/${el.dataset.go}`; });
+
+  // 스크린샷: 파일 선택 · 끌어다 놓기 · 붙여넣기(선봉 화면이 보일 때만)
+  root.querySelector('#l-shot-file').addEventListener('change', e => { handleShot(e.target.files[0]); e.target.value = ''; });
+  const drop = root.querySelector('#l-drop').closest('.card');
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragging'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('dragging'));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('dragging'); handleShot(e.dataTransfer.files[0]); });
+  document.addEventListener('paste', e => {
+    if (root.hidden) return;
+    const item = [...(e.clipboardData?.items || [])].find(i => i.type.startsWith('image/'));
+    if (item) { e.preventDefault(); handleShot(item.getAsFile()); }
+  });
+  on(root, 'click', '[data-shot-use]', (e, el) => useShotRow(+el.dataset.shotUse));
+  on(root, 'change', '[data-shot-alt]', (e, el) => {
+    const [p, s] = el.dataset.shotAlt.split(',').map(Number);
+    (shot.picks[p] ||= {})[s] = el.value ? +el.value : null;
+    renderShot();
+  });
+  on(root, 'click', '[data-act="shot-close"]', () => { Object.assign(shot, { data: null, result: null, picks: {}, crop: false }); renderShot(); });
+  on(root, 'click', '[data-act="shot-crop"]', () => { shot.crop = !shot.crop; renderShot(); });
+  // 플레이어 패널 영역 직접 지정 (드래그)
+  shotEl.addEventListener('pointerdown', e => {
+    if (!shot.crop || e.target.id !== 'l-shot-canvas') return;
+    e.preventDefault();
+    e.target.setPointerCapture(e.pointerId);
+    shot.drag = { x0: e.offsetX, y0: e.offsetY, x1: e.offsetX, y1: e.offsetY };
+  });
+  shotEl.addEventListener('pointermove', e => {
+    if (!shot.drag || e.target.id !== 'l-shot-canvas') return;
+    shot.drag.x1 = e.offsetX; shot.drag.y1 = e.offsetY;
+    drawCropBox(e.target);
+  });
+  shotEl.addEventListener('pointerup', e => {
+    if (!shot.drag) return;
+    const d = shot.drag;
+    shot.drag = null;
+    // 화면 표시 크기 → 원본 픽셀 (캔버스가 CSS 로 줄어들었을 수 있음)
+    const canvas = root.querySelector('#l-shot-canvas');
+    const css = canvas.getBoundingClientRect().width / canvas.width;
+    const toImg = v => v / css / shot.k;
+    const rect = { x: toImg(Math.min(d.x0, d.x1)), y: toImg(Math.min(d.y0, d.y1)), w: toImg(Math.abs(d.x1 - d.x0)), h: toImg(Math.abs(d.y1 - d.y0)) };
+    if (rect.w < 20 || rect.h < 40) return renderShot();
+    shot.crop = false;
+    runShot(rect);
+  });
+}
+
+async function handleShot(file) {
+  if (!file || !file.type.startsWith('image/')) return toast('이미지 파일을 올려 주세요');
+  if (!isGameMode()) toast('스크린샷 인식은 「포켓몬 파티!」 화면 기준이에요');
+  try {
+    shot.data = await readImage(file);
+  } catch (e) {
+    return toast(e.message);
+  }
+  shot.picks = {};
+  shot.crop = false;
+  runShot(null);
+}
+
+async function runShot(rect) {
+  shot.busy = true;
+  renderShot();
+  await new Promise(r => setTimeout(r, 30));   // "읽는 중" 을 먼저 그리고 계산
+  try {
+    shot.result = await analyzeShot(shot.data, rect);
+  } catch (e) {
+    toast(`인식에 실패했어요 (${e.message})`);
+  }
+  shot.busy = false;
+  shot.picks = {};
+  // 보드 화면을 못 찾았으면 바로 패널 영역을 지정할 수 있게
+  shot.crop = !!shot.result && !shot.result.found;
+  renderShot();
+}
+
+/** 사용자가 고친 값 → 없으면 인식 결과 */
+const shotPick = (p, s) => (shot.picks[p] && s in shot.picks[p] ? shot.picks[p][s] : shot.result.players[p][s].id);
+
+function useShotRow(p) {
+  const ids = [];
+  const species = new Set();
+  shot.result.players[p].forEach((cell, s) => {
+    const id = cell.empty ? null : shotPick(p, s);
+    const mon = id && store.engine.byId.get(id);
+    if (mon && !species.has(mon.sp)) { species.add(mon.sp); ids.push(id); }
+  });
+  if (!ids.length) return toast('이 패널에서 읽은 포켓몬이 없어요');
+  update(s => { s.opponents = ids.slice(0, 6); });
+  toast(`${p + 1}번 패널의 ${ids.length}마리를 상대 파티로 넣었어요`);
+  resultEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function drawCropBox(canvas) {
+  drawPreview(canvas, shot.data, null);
+  const d = shot.drag, g = canvas.getContext('2d');
+  const css = canvas.getBoundingClientRect().width / canvas.width;
+  g.strokeStyle = '#ffcb05';
+  g.lineWidth = 2;
+  g.setLineDash([6, 4]);
+  g.strokeRect(Math.min(d.x0, d.x1) / css, Math.min(d.y0, d.y1) / css, Math.abs(d.x1 - d.x0) / css, Math.abs(d.y1 - d.y0) / css);
+}
+
+function renderShot() {
+  const { engine } = store;
+  if (!shot.busy && !shot.result) { shotEl.hidden = true; shotEl.innerHTML = ''; return; }
+  shotEl.hidden = false;
+  const head = `<div class="card-head"><h3>${ICONS.image} 스크린샷 인식</h3>
+    <span class="sub">보드 화면 왼쪽 플레이어 패널 4개 · 주황 테두리는 확인이 필요한 칸</span>
+    <button class="btn sm ghost" type="button" data-act="shot-close">닫기</button></div>`;
+  if (shot.busy || !shot.result) {
+    shotEl.innerHTML = `${head}<p class="note">아이콘을 읽는 중… (처음 한 번은 아이콘 데이터 약 0.5MB를 받아요)</p>`;
+    return;
+  }
+  const mine = new Set(store.party.map(m => engine.byId.get(m.id)?.sp));
+  const rows = shot.result.players.map((row, p) => {
+    const ids = row.map((c, s) => (c.empty ? null : shotPick(p, s))).filter(Boolean);
+    const isMe = ids.length > 0 && ids.filter(id => mine.has(engine.byId.get(id)?.sp)).length >= Math.max(2, Math.ceil(ids.length * 0.6));
+    const chips = row.map((cell, s) => {
+      if (cell.empty) return '';
+      const id = shotPick(p, s), mon = id && engine.byId.get(id);
+      const pic = mon ? sprite(mon) : '<span class="shot-none">?</span>';
+      // 고르지 않고 인식한 그대로일 때만 이로치·기절 표시
+      const tags = id === cell.id ? `${cell.shiny ? '<i class="shot-tag">이로치</i>' : ''}${cell.fainted ? '<i class="shot-tag faint">기절</i>' : ''}` : '';
+      if (!cell.unsure) return `<span class="shot-mon">${pic}<b>${esc(mon?.ko || '알 수 없음')}</b>${tags}</span>`;
+      return `<label class="shot-mon unsure" title="확인이 필요해요">${pic}<select class="select" data-shot-alt="${p},${s}">
+        ${cell.alts.map(a => `<option value="${a.id}" ${a.id === id ? 'selected' : ''}>${esc(engine.byId.get(a.id)?.ko || '')}</option>`).join('')}
+        <option value="" ${id ? '' : 'selected'}>(없음)</option></select>${tags}</label>`;
+    }).join('');
+    return `<div class="shot-row ${isMe ? 'me' : ''}">
+      <span class="shot-label">${p + 1}번 패널${isMe ? '<em>내 파티</em>' : ''}</span>
+      <div class="shot-mons">${chips || '<span class="note">포켓몬 없음</span>'}</div>
+      <button class="btn sm ${isMe ? 'ghost' : 'primary'}" type="button" data-shot-use="${p}" ${ids.length ? '' : 'disabled'}>상대로 설정</button>
+    </div>`;
+  }).join('');
+  const missed = !shot.result.found
+    ? '<p class="shot-warn">보드 화면의 플레이어 패널을 자동으로 찾지 못했어요. 미리보기에서 <b>왼쪽 색깔 패널 4개</b>를 드래그로 감싸 주면 다시 읽어요.</p>' : '';
+  shotEl.innerHTML = `${head}${missed}
+    <div class="shot-body">
+      <div class="shot-preview">
+        <canvas id="l-shot-canvas" class="${shot.crop ? 'cropping' : ''}"></canvas>
+        <p class="note">${shot.crop ? '미리보기에서 <b>플레이어 패널 4개(색깔 상자)</b>를 드래그로 감싸세요.' : '칸 위치가 어긋났다면'}
+          <button class="link-btn" type="button" data-act="shot-crop">${shot.crop ? '취소' : '패널 영역 직접 지정'}</button></p>
+      </div>
+      <div class="shot-rows">${rows}</div>
+    </div>`;
+  shot.k = drawPreview(shotEl.querySelector('#l-shot-canvas'), shot.data, shot.crop ? null : shot.result);
 }
 
 /** 상대 파티에 추가. 실패 사유 또는 null */
