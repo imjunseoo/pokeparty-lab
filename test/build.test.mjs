@@ -75,3 +75,35 @@ test('할 일: 이득이 큰 순서이고, 기술 할 일을 다 하면 최선 �
   for (const s of steps.filter(x => x.kind === 'move')) mv = s.forget ? mv.map(x => (x === s.forget ? s.learn : x)) : [...mv, s.learn];
   assert.deepEqual([...mv].sort(), [...best.mv].sort());
 });
+
+test('추천 도구 기준: 구애 도구를 빼면 구애 도구를 고르지 않고, 도구 없이는 도구를 비운다 · 못 구하면 대신 지닐 도구', () => {
+  const CHOICE = ['choice-band', 'choice-specs', 'choice-scarf'];
+  const noChoice = createBuilder(ctx, book, { level: 75, sets, items: new Set([...items].filter(i => !CHOICE.includes(i))) });
+  const none = createBuilder(ctx, book, { level: 75, sets, items: new Set() });
+  for (const slug of ['garchomp', 'charizard', 'gengar', 'dragapult', 'hydreigon']) {
+    const m = mon(slug);
+    assert.ok(!CHOICE.includes(noChoice.optimize(m, blank(m)).it), `${slug} 구애 도구 빼기`);
+    assert.equal(none.optimize(m, blank(m)).it, null, `${slug} 도구 없이`);
+  }
+  // 못 구하면: 고를 수 있는 도구 중 점수가 높은 순 + 마지막은 도구 없이, 목표 도구 자신은 없음
+  const g = mon('garchomp');
+  const best = builder.optimize(g, blank(g));
+  const alt = builder.itemAlternatives(g, best);
+  assert.ok(best.it && alt.length >= 2);
+  assert.equal(alt[alt.length - 1].it, null);
+  assert.ok(alt.every(a => a.it !== best.it));
+  assert.ok(alt.slice(0, -1).every((a, k, l) => k === 0 || l[k - 1].diff >= a.diff), '점수 높은 순');
+  assert.ok(alt[alt.length - 1].diff <= alt[0].diff, '도구 없이가 가장 아쉽거나 같다');
+  assert.deepEqual(none.itemAlternatives(g, { ...best, it: null }), []);
+});
+
+test('전용도구: 쓸 수 있는 포켓몬이 아니면 고르지 않는다 (플레이트 → 아르세우스만 상점에서 팜)', () => {
+  assert.deepEqual(data.signatureUsers['draco-plate'], [493]);
+  assert.deepEqual(data.signatureUsers['light-ball'], [25]);
+  const itemOk = (m, it) => !data.signatureUsers[it] || data.signatureUsers[it].includes(m.sp);
+  const b2 = createBuilder(ctx, book, { level: 75, sets, items, itemOk });
+  const g = mon('garchomp');
+  const best = b2.optimize(g, blank(g));
+  assert.ok(!best.it?.endsWith('-plate'), '한카리아스에게 플레이트 없음');
+  assert.ok(b2.itemAlternatives(g, best, { limit: 10 }).every(a => !a.it?.endsWith('-plate')));
+});

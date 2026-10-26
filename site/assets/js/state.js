@@ -2,7 +2,7 @@
 import { createEngine } from './core/engine.js';
 import { createSearch } from './core/search.js';
 import { createContext, finalsOf } from './core/party.js';
-import { createMoveBook, createBuilder, NATURES } from './core/build.js';
+import { createMoveBook, createBuilder, NATURES, CHOICE, ITEM_MODES } from './core/build.js';
 import { josa, storage } from './ui/dom.js';
 
 export const TYPE_MODE = 'type';
@@ -20,7 +20,8 @@ export const store = {
   mode: TYPE_MODE,
   filters: { game: 'all', legend: false, mega: false, minBst: 450, usageMega: true },
   // relearn: 기술 떠올리기(기술 칸·학습장치의 교배·가르침·기술머신 기술)까지 추천·대체에 쓸지
-  game: { map: 'tour', rule: 'normal', battle: 'single', legends: false, relearn: true },
+  // items: 추천 세팅에 쓸 도구 'all' 전부 · 'nochoice' 구애 도구 빼기 · 'none' 도구 없이
+  game: { map: 'tour', rule: 'normal', battle: 'single', legends: false, relearn: true, items: 'all' },
   party: [],        // [{ id, ability, tera, picked, evo(진화 목표 id), mega(메가진화 폼 id), set(내 세팅) }]
   opponents: [],    // 선봉 추천용 상대 파티 [id]
   wild: [],         // 포획 추천: 야생 칸에서 나온 후보 [id] (최대 3)
@@ -96,10 +97,19 @@ export function toggleRelearn() {
 }
 export const relearnToast = on => (on ? '기술 떠올리기 ON · 교배·가르침·기술머신 기술까지 추천·대체에 써요' : '기술 떠올리기 OFF · 레벨업 기술만으로 추천·대체해요');
 
+/** 추천 세팅에 쓸 도구 기준 (core/build.js ITEM_MODES) */
+export const itemMode = () => (ITEM_MODES.some(m => m.key === store.game.items) ? store.game.items : 'all');
+export function setItemMode(mode) {
+  update(s => { s.game.items = mode; });
+  const m = ITEM_MODES.find(x => x.key === itemMode());
+  return `추천 도구: ${m.name} · 최선 세팅·대체 도구를 다시 골랐어요`;
+}
+
 /** 추천 세팅 카드용 게임 정보. relearn: { on, of(mon) → 기술 떠올리기로만 배우는 기술 Set | null (기술 데이터 전) } */
 export const gameOpts = () => (isGameMode() ? {
   data: store.gameData, rule: gameRule(),
   relearn: { on: store.game.relearn !== false, of: mon => getBuilder()?.relearnOnly(mon) || null },
+  items: { mode: itemMode(), usable: usableItems() },
 } : null);
 
 export async function loadUsage() {
@@ -144,16 +154,31 @@ export function allowedItems(rule = gameRule()) {
     ...(uses.includes('tera') ? it.tera : []), ...(uses.includes('dynamax') ? it.dynamax : [])]);
 }
 
+/** 추천·최선 세팅에 쓰는 도구 = 구할 수 있는 도구 중 도구 기준(구애 빼기 · 도구 없이)에 맞는 것 */
+export function usableItems(rule = gameRule()) {
+  const all = allowedItems(rule);
+  if (!all) return null;
+  const mode = itemMode();
+  if (mode === 'none') return new Set();
+  return mode === 'nochoice' ? new Set([...all].filter(i => !CHOICE.has(i))) : all;
+}
+
+/** 이 포켓몬이 구할 수 있는 도구인지: 전용도구 칸은 쓸 수 있는 포켓몬을 가졌을 때만 팜 (플레이트 → 아르세우스, 전기구슬 → 피카츄 …) */
+export function itemOkFor(mon, it) {
+  const users = store.gameData?.signatureUsers?.[it];
+  return !users || users.includes(mon.sp);
+}
+
 let builderCache = null, builderKey = '';
 /** 세팅 평가기 (게임 모드 + 기술 데이터가 있을 때). 데이터 기준·배틀 방식·룰이 바뀌면 새로 만든다 */
 export function getBuilder() {
   if (!isGameMode() || !store.moves) return null;
   const ctx = getContext();
-  const key = `${ctxKey}|${store.game.battle}|${gameRule()?.key}|${!!store.sets}|${store.game.relearn !== false}`;
+  const key = `${ctxKey}|${store.game.battle}|${gameRule()?.key}|${!!store.sets}|${store.game.relearn !== false}|${itemMode()}`;
   if (key !== builderKey || !builderCache) {
     builderCache = createBuilder(ctx, store.moves, {
-      level: store.gameData.finalLevel, battle: store.game.battle, sets: store.sets, items: allowedItems(),
-      relearn: store.game.relearn !== false,
+      level: store.gameData.finalLevel, battle: store.game.battle, sets: store.sets, items: usableItems(),
+      relearn: store.game.relearn !== false, itemOk: itemOkFor,
     });
     builderKey = key;
   }

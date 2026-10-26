@@ -240,6 +240,15 @@ function build({ dat, dex, sets, T }) {
       shop: shopExcluded.has(key) ? null : partyOverride[key] || partyPrice[partyTier(key)],
     };
   });
+  // 전용도구 칸은 쓸 수 있는 포켓몬을 가졌을 때만 팜 (shop_signature_stock): 도구 → 쓸 수 있는 종 번호
+  //   SIGNATURE_USERS (플레이트 → 아르세우스, 전기구슬 → 피카츄 …) · 폼체인지 도구는 FORM_CHANGE_SPECIES 먼저. 부스트에너지는 패러독스 전부라 뺌
+  const usersOf = src => [...src.matchAll(/(\w+):\s*\[([^\]]*)\]/g)].map(([, key, list]) => [key, syms(list)]);
+  const signatureUsers = {};
+  for (const [key, list] of [...usersOf(block(script('Board_Evolution'), 'FORM_CHANGE_SPECIES', '{')), ...usersOf(block(shopSrc, 'SIGNATURE_USERS', '{'))]) {
+    const slug = item(key);
+    if (!items.signature.includes(slug) || signatureUsers[slug]) continue;
+    signatureUsers[slug] = [...new Set(list.map(sp => defaultOf.get(sp)?.sp).filter(Boolean))];
+  }
   const tourneyShopCount = priceOf('TOURNEY_SHOP_COUNT');
   const evoItemPrice = priceOf('EVOLUTION_ITEM_PRICE');
   const levelTable = (block(lvSrc, 'LEVEL_TABLE').replace(/#.*$/gm, '').match(/\d+/g) || []).map(Number);
@@ -373,6 +382,7 @@ function build({ dat, dex, sets, T }) {
     levelTable,
     tourneyShop,
     tourneyShopCount,
+    signatureUsers,
     evoItemPrice,
     maps,
     starters,

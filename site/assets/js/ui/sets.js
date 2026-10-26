@@ -2,6 +2,7 @@
 // 「포켓몬 파티!」 모드에서는 게임에서 못 구하는 도구 · 못 배우는 기술을 표시하고 기믹 룰에 맞춰 보여준다.
 import { esc, josa } from './dom.js';
 import { sprite, typeBadge, moveLabel, itemLabel, natureText, spreadText } from './components.js';
+import { ITEM_MODES } from '../core/build.js';
 
 // 세팅 우선순위 (B 배틀스타디움 싱글 · S Smogon 싱글 · D 더블 · R 랜덤배틀 · A 자체 생성)
 const ORDER = {
@@ -37,6 +38,14 @@ export const relearnMark = () => `<span class="re-mark" title="${RELEARN_TIP}">�
 export const relearnToggle = on => `<button type="button" class="re-toggle ${on ? 'on' : ''}" data-act="relearn-toggle" aria-pressed="${on}"
   title="${on ? '켜짐: 기술 칸·학습장치의 기술 떠올리기로 배우는 교배·가르침·기술머신 기술까지 추천·대체에 써요' : '꺼짐: 레벨업으로 배우는 기술만으로 추천·대체해요'}">기술 떠올리기 <b>${on ? 'ON' : 'OFF'}</b></button>`;
 
+/** 도구 기준 버튼 (전부 · 구애 빼기 · 없이, 추천 세팅 도구 줄 옆, 모든 카드 공통 설정) */
+export const itemModeControl = mode => `<span class="it-mode" role="group" aria-label="추천에 쓸 도구">${ITEM_MODES.map(m => `<button type="button"
+  class="${m.key === mode ? 'on' : ''}" data-act="item-mode" data-mode="${m.key}" aria-pressed="${m.key === mode}" title="${m.name}: ${m.desc} 추천·대체">${m.label}</button>`).join('')}</span>`;
+/** 「구애 도구 빼기」로 · 「도구 없이」로 */
+const modeName = mode => { const n = ITEM_MODES.find(m => m.key === mode).name; return `「${n}」${josa(n, '으로').slice(n.length)}`; };
+/** 도구 기준 때문에 뺀 도구의 이유 */
+export const itemModeWhy = mode => (mode === 'none' ? '도구 없이 보는 중 (도구 기준)' : '구애 도구 빼 둠 (도구 기준) · 상점·아이템 칸에서 무작위라 구하기 힘든 도구');
+
 /**
  * 같은 이름의 파티 아이템이 따로 있는 도구 (돌격조끼·자석·레드카드…) 안내 문장. info: gameData.itemInfo[slug]
  * 파티 아이템 쪽은 보드 효과만 있고 지닐 수 없다.
@@ -59,7 +68,10 @@ export function partyTwinNote(info) {
 export function setCard(engine, setsData, mon, set, { mode, game = null, header = true, extra = '', tabs = '', desc = null, subs = null } = {}) {
   const line = (label, vals) => (vals ? `<div class="set-line"><span>${label}</span><span class="vals">${vals}</span></div>` : '');
   const illegal = new Set(game?.data.illegal[mon.id] || []);
-  const allowed = game ? gameItemSet(game.data, game.rule) : null;
+  // obtainable: 이 룰에서 구할 수 있는 도구, allowed: 그중 도구 기준(구애 빼기 · 도구 없이)에 맞는 것
+  const obtainable = game ? gameItemSet(game.data, game.rule) : null;
+  const allowed = game?.items?.usable || obtainable;
+  const itemMode = game?.items?.mode || 'all';
   const itemName = slug => (game?.data.itemNames[slug] ? esc(game.data.itemNames[slug][0]) : itemLabel(setsData, slug));
   const na = (html, title) => `<span class="na" title="${esc(title)}">${html}</span>`;
   const CLS = ['변화', '물리', '특수'];
@@ -88,8 +100,9 @@ export function setCard(engine, setsData, mon, set, { mode, game = null, header 
   const items = set.it.map(i => {
     if (!allowed || allowed.has(i)) return itemName(i) + partyTwin(i);
     const s = subs?.item?.[0] === i ? subs.item[1] : null;
-    return na(itemName(i), '게임 상점·아이템 칸에서 구할 수 없는 도구') + (s ? `<span class="sub-arrow">→</span><span class="is-sub">${esc(s.ko)}<span class="sub-mark">대체</span></span>` : '');
-  }).join(' <em>/</em> ');
+    return na(itemName(i), obtainable.has(i) ? itemModeWhy(itemMode) : '게임 상점·아이템 칸에서 구할 수 없는 도구')
+      + (s ? `<span class="sub-arrow">→</span>${s.slug ? `<span class="is-sub">${esc(s.ko)}<span class="sub-mark">대체</span></span>` : '<span class="faint">도구 없이</span>'}` : '');
+  }).join(' <em>/</em> ') + (game && set.it.length ? itemModeControl(itemMode) : '');
   const natures = set.na.filter(Boolean).map(n => natureText(setsData, n)).join(' <em>/</em> ');
   const evs = set.ev ? ` <span class="faint">${spreadText(set.ev)}</span>` : '';
   const uses = game?.rule?.uses || [];
@@ -113,7 +126,7 @@ export function setCard(engine, setsData, mon, set, { mode, game = null, header 
     ${line('테라', tera)}
     ${line('메가진화', megaLine)}
     ${set.pool ? '<p class="note">기술 후보 중 4개를 골라 쓰는 역할별 세팅이에요.</p>' : ''}
-    ${hasNa ? `<p class="note na-note">취소선 항목은 「포켓몬 파티!」에서 구할 수 없거나 배울 수 없어요${reOn ? '' : ' (기술 떠올리기를 꺼서 교배·가르침·기술머신 기술 포함)'}. ${subs ? '옆의 <b>대체</b>는 같은 역할로 이 게임에서 쓸 수 있는 기술·도구예요.' : '비슷한 도구·기술로 바꿔 쓰세요.'}</p>` : ''}
+    ${hasNa ? `<p class="note na-note">취소선 항목은 「포켓몬 파티!」에서 구할 수 없거나 배울 수 없어요${reOn ? '' : ' (기술 떠올리기를 꺼서 교배·가르침·기술머신 기술 포함)'}${itemMode !== 'all' && set.it.some(i => obtainable.has(i) && !allowed.has(i)) ? ` (도구 기준 ${modeName(itemMode)} 뺀 도구 포함)` : ''}. ${subs ? '옆의 <b>대체</b>는 같은 역할로 이 게임에서 쓸 수 있는 기술·도구예요.' : '비슷한 도구·기술로 바꿔 쓰세요.'}</p>` : ''}
     ${isChampions(mode) && set.ev ? '<p class="note">노력치는 SV 기준이에요 (챔피언스는 능력 포인트 체계).</p>' : ''}
     ${extra}
   </div>`;

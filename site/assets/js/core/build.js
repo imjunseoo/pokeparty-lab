@@ -38,7 +38,14 @@ export const TYPE_ITEMS = {
 export const MODELED_ITEMS = new Set([...Object.keys(TYPE_ITEMS), 'choice-band', 'choice-specs', 'choice-scarf', 'life-orb', 'expert-belt',
   'muscle-band', 'wise-glasses', 'punching-glove', 'loaded-dice', 'power-herb', 'assault-vest', 'leftovers', 'sitrus-berry',
   'focus-sash', 'eviolite', 'light-ball', 'thick-club', 'black-sludge']);
-const CHOICE = new Set(['choice-band', 'choice-specs', 'choice-scarf']);
+// 구애 도구 (상점·아이템 칸에서 무작위라 구하기 힘들어 빼고 볼 수 있음)
+export const CHOICE = new Set(['choice-band', 'choice-specs', 'choice-scarf']);
+// 추천 세팅에 쓸 도구 기준: 전부 · 구애 도구 빼기 · 도구 없이 (못 구했을 때)
+export const ITEM_MODES = [
+  { key: 'all', label: '전부', name: '모든 도구', desc: '이 룰에서 구할 수 있는 도구 전부' },
+  { key: 'nochoice', label: '구애 빼기', name: '구애 도구 빼기', desc: '구애머리띠·구애안경·구애스카프를 빼고' },
+  { key: 'none', label: '없이', name: '도구 없이', desc: '도구를 못 구했을 때 기준으로' },
+];
 // -ate 특성: 노말 기술 → 그 타입 ×1.2
 const ATE = { aerilate: 'flying', pixilate: 'fairy', refrigerate: 'ice', galvanize: 'electric' };
 const ABILITY_TYPE = { transistor: ['electric', 1.3], 'dragons-maw': ['dragon', 1.5], steelworker: ['steel', 1.5], 'rocky-payload': ['rock', 1.5], 'water-bubble': ['water', 2] };
@@ -103,7 +110,8 @@ export function statsAt(base, level, iv = [], nature = null) {
  * opts.items: 이 룰에서 구할 수 있는 도구 Set (없으면 도구는 계산에서 고르지 않음)
  */
 // relearn: 기술 떠올리기(교배·가르침·기술머신) 기술까지 쓸지. false 면 레벨업 기술만으로 최선 세팅·대체 기술을 고른다
-export function createBuilder(ctx, book, { level = 75, battle = 'single', sets = null, items = null, relearn = true } = {}) {
+// itemOk(mon, it): 그 포켓몬이 구할 수 있는 도구인지 (전용도구 칸은 쓸 수 있는 포켓몬을 가졌을 때만 팜: 플레이트 → 아르세우스 등)
+export function createBuilder(ctx, book, { level = 75, battle = 'single', sets = null, items = null, relearn = true, itemOk = () => true } = {}) {
   const { engine } = ctx;
   const { tIdx } = engine;
   const double = battle === 'double';
@@ -394,7 +402,7 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
     let set = { ...cur, iv: full, ab: abilities.includes(cur.ab) ? cur.ab : abilities[0] || null, it: fixedItem || cur.it || null };
     if (!set.na) set.na = 'hardy';
     const itemList = fixedItem ? [fixedItem] : items
-      ? [null, ...[...items].filter(i => MODELED_ITEMS.has(i) || prior(mon).it.has(i))]
+      ? [null, ...[...items].filter(i => (MODELED_ITEMS.has(i) || prior(mon).it.has(i)) && itemOk(mon, i))]
       : [set.it];
     for (let round = 0; round < 3; round++) {
       const before = JSON.stringify(set);
@@ -456,5 +464,18 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
     return steps.filter(s => s.gain > 0.05).sort((a, b) => b.gain - a.gain);
   }
 
-  return { evaluate, optimize, plan, learnable, relearnOnly, relearn, profile, statsAt: (mon, set) => profile(mon, set).st, level };
+  /**
+   * 목표 도구를 못 구했을 때 대신 지닐 도구 (상점·아이템 칸 도구는 무작위라 노린 도구가 안 나오기 쉬움).
+   * 고를 수 있는 도구 중 점수가 높은 순 + 도구 없이. @returns [{ it | null, diff(목표 대비 점수 차) }]
+   */
+  function itemAlternatives(mon, set, { limit = 3 } = {}) {
+    if (!set.it || !items) return [];
+    const base = evaluate(mon, set).score;
+    const list = [...items].filter(i => i !== set.it && (MODELED_ITEMS.has(i) || prior(mon).it.has(i)) && itemOk(mon, i))
+      .map(it => ({ it, diff: evaluate(mon, { ...set, it }).score - base }))
+      .sort((a, b) => b.diff - a.diff).slice(0, limit);
+    return [...list, { it: null, diff: evaluate(mon, { ...set, it: null }).score - base }];
+  }
+
+  return { evaluate, optimize, plan, learnable, relearnOnly, relearn, itemAlternatives, profile, statsAt: (mon, set) => profile(mon, set).st, level };
 }

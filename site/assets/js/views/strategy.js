@@ -3,16 +3,17 @@
 // 게임에서 한 뒤 「했어요」를 누르면 내 세팅에 기록해 다음 할 일로 바뀐다.
 import {
   store, update, getContext, partyMembers, isGameMode, gameRule, getBuilder, loadMoves, evoOptions, allowedItems, setMode,
-  GAME_MODE, toggleRelearn, relearnToast,
+  GAME_MODE, toggleRelearn, relearnToast, setItemMode, itemMode,
 } from '../state.js';
-import { analyzeMember, selectedTarget, natureLabel } from '../ui/builder.js';
+import { analyzeMember, selectedTarget, natureLabel, itemAlts } from '../ui/builder.js';
 import { tileActions, growthPicks, holderRank } from '../core/strategy.js';
+import { ITEM_MODES } from '../core/build.js';
 import { recommendTypes, memberValues } from '../core/party.js';
 import { STAT_LABELS } from '../core/engine.js';
 import { esc, on, toast, josa } from '../ui/dom.js';
 import { sprite, typeBadge } from '../ui/components.js';
 import { itemName, itemSource, itemPartyWarning, catchHint } from '../ui/reasons.js';
-import { relearnToggle } from '../ui/sets.js';
+import { relearnToggle, itemModeControl } from '../ui/sets.js';
 import { searchSelect, defineOptions, bindSearchSelects } from '../ui/searchselect.js';
 import { openSetEditor } from './party.js';
 
@@ -37,6 +38,7 @@ export function initStrategy(el) {
 
   on(root, 'click', '[data-act="game-mode"]', async () => { await setMode(GAME_MODE); toast('「포켓몬 파티!」 게임 룰로 분석해요'); });
   on(root, 'click', '[data-act="relearn-toggle"]', () => toast(relearnToast(toggleRelearn())));
+  on(root, 'click', '[data-act="item-mode"]', (e, el) => toast(setItemMode(el.dataset.mode)));
   on(root, 'click', '[data-edit]', (e, el) => { openSetEditor(+el.dataset.edit); location.hash = '#/party'; });
   on(root, 'click', '[data-done]', (e, el) => applyDone(el.dataset.done));
   root.addEventListener('ss-change', e => { if (e.target.closest('[data-ss="st-item"]')) { lookup = e.detail || ''; renderStrategy(); } });
@@ -156,7 +158,7 @@ function summaryCard(rows, acts) {
   ].filter(Boolean).map((x, k) => `<span class="st-rank ${k ? '' : 'top'}">${x}</span>`);
   return `<section class="card st-summary">
     <div class="st-party">${rows.map(r => `<span class="st-mem ${r.known ? 'known' : ''}" title="${esc(r.mon.ko)} · ${r.known ? '세팅 입력함' : '세팅 입력 안 함'}${r.sel ? ` · 목표: ${esc(r.sel.chip)}` : ''}">${sprite(r.mon)}</span>`).join('')}
-      <span class="note">세팅 입력 ${known}/${rows.length} · ${esc(data.maps.find(m => m.key === g.map)?.name || '')} · ${esc(gameRule().name)} · ${g.battle === 'double' ? '더블' : '싱글'} · <a href="#/party">파티·설정 바꾸기</a></span></div>
+      <span class="note">세팅 입력 ${known}/${rows.length} · ${esc(data.maps.find(m => m.key === g.map)?.name || '')} · ${esc(gameRule().name)} · ${g.battle === 'double' ? '더블' : '싱글'}${itemMode() !== 'all' ? ` · ${esc(ITEM_MODES.find(m => m.key === itemMode()).name)}` : ''} · <a href="#/party">파티·설정 바꾸기</a></span></div>
     <div class="st-ranks"><span class="st-ranks-label">지금 멈추면 좋은 칸</span>${rank.join('<span class="st-sep">›</span>') || '<span class="note">할 일이 없어요. 파티가 목표 세팅과 같아요.</span>'}</div>
     <p class="note">목표는 파티 추천의 멤버 카드에서 고른 세팅(기본 = 계산한 최선 세팅)이에요. 숫자는 멤버 점수가 오르는 정도라 칸끼리 비교할 수 있어요 · 갈림길이나 이동 아이템으로 칸을 고를 수 있을 때 참고하세요.</p>
   </section>`;
@@ -205,7 +207,11 @@ function itemCard(b, rows, items) {
   const list = actList(items, a => {
     const r = rows[a.i];
     const src = itemSource(a.to);
-    return `<li>${who(r)}<span class="st-what"><b>${esc(itemName(a.to))}</b> 지니게 하기${a.from ? ` <em>← ${esc(itemName(a.from))}</em>` : ''}${assumedTag(a)}${src ? `<span class="st-src">${esc(src.text)}</span>` : ''}</span>${gainText(a.gain)}${doneBtn(r, `${a.i}|it|${a.to}`)}</li>`;
+    // 못 구하면: 대신 지닐 도구 1순위 · 도구 없이 (메가스톤은 정해진 도구라 없음)
+    const alt = r.stone ? [] : itemAlts(b, r.pm, r.target);
+    const altText = alt.length ? [alt[0], alt[alt.length - 1]].filter((x, k, l) => l.indexOf(x) === k)
+      .map(x => `${x.it ? esc(itemName(x.it)) : '도구 없이'} ${x.diff >= 0 ? '+' : '−'}${Math.abs(x.diff).toFixed(1)}`).join(' · ') : '';
+    return `<li>${who(r)}<span class="st-what"><b>${esc(itemName(a.to))}</b> 지니게 하기${a.from ? ` <em>← ${esc(itemName(a.from))}</em>` : ''}${assumedTag(a)}${src ? `<span class="st-src">${esc(src.text)}</span>` : ''}${altText ? `<span class="st-src">못 구하면 ${altText}</span>` : ''}</span>${gainText(a.gain)}${doneBtn(r, `${a.i}|it|${a.to}`)}</li>`;
   });
   let found = '';
   if (lookup) {
@@ -226,7 +232,8 @@ function itemCard(b, rows, items) {
       ${searchSelect({ name: 'st-item', list: 'st-item', value: lookup, placeholder: '나온 도구 이름·초성', label: '나온 도구' })}</div>
     ${found}
     <h4 class="st-sub">목표 도구</h4>
-    ${list || '<p class="build-done">✔ 모두 목표 도구를 지녔어요.</p>'}
+    ${list || (itemMode() === 'none' ? '<p class="note">도구 없이 보는 중이라 목표 도구가 없어요. 나온 도구는 위에서 검색하세요.</p>' : '<p class="build-done">✔ 모두 목표 도구를 지녔어요.</p>')}
+    <div class="st-foot"><span class="note">추천 도구</span>${itemModeControl(itemMode())}</div>
   </section>`;
 }
 

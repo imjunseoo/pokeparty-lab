@@ -1,5 +1,5 @@
 // 상대 약점 찾기/포켓몬 검색: 포켓몬 → 약점/내성, 내 파티 대면, 실전·추천 세팅, 카운터, 자속 공격 상성
-import { store, getContext, partyMembers, addRecent, addToParty, usageInfo, isGameMode, gameRule, whereToFind, setsOrder, gameOpts, loadMoves, toggleRelearn, relearnToast } from '../state.js';
+import { store, getContext, partyMembers, addRecent, addToParty, usageInfo, isGameMode, gameRule, whereToFind, setsOrder, gameOpts, loadMoves, toggleRelearn, relearnToast, setItemMode } from '../state.js';
 import { substitutesFor } from '../ui/builder.js';
 import { createPicker } from '../ui/picker.js';
 import { esc, on, toast, copyText, josa } from '../ui/dom.js';
@@ -43,6 +43,7 @@ export function initMatchup(el) {
     toast(err || `${josa(mon.ko, '을를')} 파티에 추가했어요`);
   });
   on(root, 'click', '[data-act="relearn-toggle"]', () => toast(relearnToast(toggleRelearn())));
+  on(root, 'click', '[data-act="item-mode"]', (e, el) => toast(setItemMode(el.dataset.mode)));
   on(root, 'click', '[data-act="copy-link"]', async () => {
     toast(await copyText(location.href) ? '링크를 복사했어요' : '복사에 실패했어요');
   });

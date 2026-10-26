@@ -3,12 +3,13 @@
 // 예시를 고르면 바로 다음 추천을 다시 계산한다.
 import {
   store, update, getContext, partyMembers, addToParty, encodeParty, usageInfo,
-  isGameMode, gameRule, battleMode, whereToFind, setsOrder, gameOpts, evoOptions, megaOptions, loadMoves, sanitizeSet, toggleRelearn, relearnToast,
+  isGameMode, gameRule, battleMode, whereToFind, setsOrder, gameOpts, evoOptions, megaOptions, loadMoves, sanitizeSet, toggleRelearn, relearnToast, setItemMode,
 } from '../state.js';
 import { createPicker } from '../ui/picker.js';
 import { esc, on, toast, copyText, josa } from '../ui/dom.js';
 import { sprite, typeBadge, typeList, mult, ICONS, moveLabel, itemLabel, natureText, spreadText } from '../ui/components.js';
 import { ABILITY_EFFECTS } from '../core/engine.js';
+import { ITEM_MODES } from '../core/build.js';
 import { analyze, recommend, recommendTypes, explainSlot, explainCandidate, memberValues, alternativesFor, bestSwaps } from '../core/party.js';
 import { orderedSets, setCard } from '../ui/sets.js';
 import { reasonChip, commentText, itemName, addPlan, catchHint } from '../ui/reasons.js';
@@ -125,6 +126,7 @@ export function initParty(el) {
     toast(`${t?.title || '세팅'}을 채웠어요 · 실제와 다르면 고친 뒤 저장하세요`);
   });
   on(root, 'click', '[data-act="relearn-toggle"]', () => toast(relearnToast(toggleRelearn())));
+  on(root, 'click', '[data-act="item-mode"]', (e, el) => toast(setItemMode(el.dataset.mode)));
   // 멤버 카드의 세팅 버튼 (최선 ↔ 참고 추천 세팅)
   on(root, 'click', '[data-pick-set]', (e, el) => {
     const [i, key] = el.dataset.pickSet.split(':');
@@ -193,11 +195,12 @@ function renderOptions(ctx) {
     const g = store.game, data = store.gameData;
     const opt = (list, cur, label) => list.map(x => `<option value="${x.key}" ${x.key === cur ? 'selected' : ''}>${esc(label(x))}</option>`).join('');
     optionsEl.innerHTML = `
-      <summary>게임 설정 <span class="note">· 포켓몬 파티! v${esc(data.meta.version)} · ${esc(data.maps.find(m => m.key === g.map)?.name || '')} · ${esc(gameRule().name)} · ${g.battle === 'double' ? '더블' : '싱글'}</span></summary>
+      <summary>게임 설정 <span class="note">· 포켓몬 파티! v${esc(data.meta.version)} · ${esc(data.maps.find(m => m.key === g.map)?.name || '')} · ${esc(gameRule().name)} · ${g.battle === 'double' ? '더블' : '싱글'}${g.items && g.items !== 'all' ? ` · ${esc(ITEM_MODES.find(m => m.key === g.items)?.name || '')}` : ''}</span></summary>
       <div class="options-body">
         <label class="field">맵 <select class="select" data-game="map">${opt(data.maps, g.map, m => `${m.name} — ${m.desc}`)}</select></label>
         <label class="field">기믹 룰 <select class="select" data-game="rule">${opt(data.rules, g.rule, r => `${r.name} — ${r.desc}`)}</select></label>
         <label class="field">배틀 <select class="select" data-game="battle">${opt(data.battleModes, g.battle, b => b.name)}</select></label>
+        <label class="field">추천 도구 <select class="select" data-game="items" title="구애 도구는 상점·아이템 칸에서 무작위라 구하기 힘들어요">${opt(ITEM_MODES, g.items || 'all', m => `${m.name} — ${m.desc}`)}</select></label>
         <label class="check"><input type="checkbox" data-game="legends" ${g.legends ? 'checked' : ''}> 미라클교환·레이드 전설도 예시에 포함</label>
         <p class="note">후보: 이 맵에서 잡을 수 있는 포켓몬 ${ctx.pool.length}종 (마지막 토너먼트 Lv.${data.finalLevel}). 방장이 고른 룰과 맵 투표 결과에 맞춰 바꿔 주세요.</p>
       </div>`;
