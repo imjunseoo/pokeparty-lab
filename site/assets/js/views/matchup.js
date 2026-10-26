@@ -1,4 +1,4 @@
-// 상성 탐색: 포켓몬 → 약점/내성, 내 파티 대면, 실전·추천 세팅, 카운터, 자속 공격 상성
+// 상대 약점 찾기/포켓몬 검색: 포켓몬 → 약점/내성, 내 파티 대면, 실전·추천 세팅, 카운터, 자속 공격 상성
 import { store, getContext, partyMembers, addRecent, addToParty, usageInfo, isGameMode, gameRule, whereToFind, setsOrder, gameOpts, loadMoves } from '../state.js';
 import { substitutesFor } from '../ui/builder.js';
 import { createPicker } from '../ui/picker.js';

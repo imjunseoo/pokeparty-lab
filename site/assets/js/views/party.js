@@ -11,7 +11,7 @@ import { sprite, typeBadge, typeList, mult, ICONS, moveLabel, itemLabel, natureT
 import { ABILITY_EFFECTS } from '../core/engine.js';
 import { analyze, recommend, recommendTypes, explainSlot, explainCandidate, memberValues, alternativesFor, bestSwaps } from '../core/party.js';
 import { orderedSets, setCard } from '../ui/sets.js';
-import { reasonChip, commentText, itemName } from '../ui/reasons.js';
+import { reasonChip, commentText, itemName, addPlan, catchHint } from '../ui/reasons.js';
 import { buildCard, readEditor, fillEditor, analyzeMember, pickSet, pickedSet, selectedTarget } from '../ui/builder.js';
 import { bindSearchSelects } from '../ui/searchselect.js';
 import { describeSet, refSource } from '../ui/setdesc.js';
@@ -159,11 +159,6 @@ function autofill() {
   toast(`${r.picks.size}마리를 예시로 채웠어요`);
 }
 
-/** 추천 후보 → 파티에 넣을 모습: 진화 전으로만 잡히면 그 모습 + 진화 목표, 메가진화 후보면 메가 폼 */
-function addPlan(c) {
-  const catchMon = !c.direct && c.from?.length ? c.from[0] : c.base;
-  return { id: catchMon.id, evo: catchMon.id !== c.base.id ? c.base.id : null, mega: c.mega ? c.mon.id : null };
-}
 
 export function renderParty() {
   if (!root) return;
@@ -272,11 +267,7 @@ function renderSlots(ctx, members) {
 
 /** 예시 포켓몬 아래에 붙는 한 줄: 게임 모드는 잡는 곳(진화 전으로 잡으면 그 모습), 실전 모드는 사용률, 타입 모드는 종족값 */
 function exampleHint(ctx, c) {
-  if (isGameMode()) {
-    const catchMon = !c.direct && c.from?.length ? c.from[0] : c.base;
-    const where = whereToFind(catchMon);
-    return catchMon.id !== c.base.id ? `${catchMon.ko} 잡아서 진화${where ? ` · ${where}` : ''}` : where || '';
-  }
+  if (isGameMode()) return catchHint(c);
   if (c.u) return `사용률 ${c.u.u}%`;
   return `종족값 ${ctx.stats(c.mon).reduce((a, b) => a + b, 0)}`;
 }

@@ -230,7 +230,7 @@ button.type { border: 0; cursor: pointer; }
 .picker-list .pl-main { flex: 1; min-width: 0; }
 .picker-list .pl-none { color: var(--muted); cursor: default; justify-content: center; padding: 14px; }
 
-/* ───────── 상성 탐색 ───────── */
+/* ───────── 상대 약점 찾기/포켓몬 검색 ───────── */
 /* 오른쪽 위 몬스터볼 링 장식은 배경으로 그려 카드 밖으로 넘치지 않게 한다 (드롭다운은 넘쳐야 하므로 overflow 는 visible) */
 .search-hero {
   background:
@@ -598,49 +598,40 @@ button.type { border: 0; cursor: pointer; }
   .catch-gain { grid-column: 1 / -1; justify-items: stretch; }
 }
 
-/* 칸 추천 */
-.board-ctrl { display: grid; gap: 10px; }
-.board-opts { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
-.dice-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.dice { min-width: 38px; height: 36px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-weight: 800; cursor: pointer; }
-.dice:hover { border-color: var(--accent); }
-.dice.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-.board-map-card { padding: 10px; }
-.board-svg { display: block; width: 100%; height: auto; max-height: 70vh; }
-.bn { cursor: pointer; }
-.bn rect { stroke: rgba(255, 255, 255, .55); stroke-width: .25; }
-.bn rect.branch { stroke: var(--text); stroke-width: .45; }
-.bn text { font-size: 2px; font-weight: 800; fill: #fff; text-anchor: middle; pointer-events: none; }
-.bn:hover rect, .bn:focus-visible rect { stroke: var(--accent); stroke-width: .5; }
-.bn:focus { outline: none; }
-.bn-here { fill: none; stroke: var(--accent); stroke-width: .6; }
-.bn-edge { stroke: var(--border-strong); stroke-width: .45; }
-.bn-edge.far { stroke-dasharray: .8 .8; }
-.bn-route { fill: none; stroke: var(--accent); stroke-width: .9; stroke-linecap: round; stroke-linejoin: round; opacity: .55; }
-.bn-rank circle { fill: var(--text); stroke: var(--surface); stroke-width: .25; }
-.bn-rank text { font-size: 1.5px; fill: var(--surface); }
-.bn.pick rect { stroke: var(--text); stroke-width: .5; }
-.board-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 8px; font-size: 12px; color: var(--muted); align-items: center; }
-.board-legend span { display: inline-flex; align-items: center; gap: 4px; }
-.board-legend i { width: 18px; height: 18px; border-radius: 5px; display: inline-grid; place-items: center; color: #fff; font-style: normal; font-size: 11px; font-weight: 800; }
-.board-legend i.here-i { background: transparent; border: 2px solid var(--accent); border-radius: 50%; }
-.bo-card { display: grid; gap: 6px; }
-.bo-card.best { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-.bo-card.best .catch-rank { background: var(--accent); color: #fff; }
-.bo-head { display: grid; grid-template-columns: auto 34px minmax(0, 1fr) minmax(90px, 150px); gap: 10px; align-items: center; }
-.bo-tile { width: 34px; height: 34px; border-radius: 9px; display: inline-grid; place-items: center; color: #fff; font-weight: 800; font-size: 15px; }
-.bo-tile.sm { width: 22px; height: 22px; border-radius: 6px; font-size: 12px; vertical-align: middle; }
-.bo-name { display: grid; gap: 2px; min-width: 0; }
-.bo-route { margin: 0; font-size: 13px; }
-.bo-wild { display: flex; flex-wrap: wrap; gap: 6px; }
-.dice-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.dice-table th, .dice-table td { padding: 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
-.dice-table tbody tr { cursor: pointer; }
-.dice-table tbody tr:hover { background: var(--surface-2); }
-.dice-table tr.bad td:last-child { color: var(--danger, #dc2626); }
+/* 스타팅 추천 */
+.starter-opts { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.gen-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
+.gen-chip { border: 1px solid var(--border-strong); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 4px 11px; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.gen-chip:hover { border-color: var(--accent); color: var(--text); }
+.gen-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.starter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.starter-btn { display: grid; grid-template-columns: 22px 44px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.starter-btn:hover { border-color: var(--accent); }
+.starter-btn.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.starter-btn.top .sb-rank { color: var(--accent); }
+.starter-btn img { width: 44px; height: 44px; }
+.sb-rank { font-weight: 900; color: var(--faint); text-align: center; }
+.sb-main { display: grid; gap: 2px; min-width: 0; }
+.sb-main b { font-size: 14px; }
+.sb-grade { display: grid; justify-items: center; line-height: 1.1; padding: 3px 7px; border-radius: 9px; background: var(--surface); border: 1px solid var(--border); }
+.sb-grade b { font-size: 17px; color: var(--gc, var(--text)); }
+.sb-grade span { font-size: 11px; color: var(--faint); font-weight: 700; }
+.combo-card { display: grid; gap: 10px; }
+.combo-card .note { margin: 0; }
+.combo-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.combo-row { display: grid; grid-template-columns: 44px 52px minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); }
+.combo-row.lead { border-color: var(--accent); }
+.combo-row > img { width: 52px; height: 52px; }
+.cr-slot { font-size: 12px; font-weight: 800; color: var(--faint); text-align: center; padding-top: 16px; }
+.combo-row.lead .cr-slot { color: var(--accent); }
+.cr-main { display: grid; gap: 4px; min-width: 0; }
+.cr-name { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.cr-name b { font-size: 15px; }
+.cr-alts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; }
+.combo-actions { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
 @media (max-width: 560px) {
-  .bo-head { grid-template-columns: auto 30px minmax(0, 1fr); }
-  .bo-head .catch-gain { grid-column: 1 / -1; justify-items: stretch; }
+  .combo-row { grid-template-columns: 34px 44px minmax(0, 1fr); }
+  .combo-row > img { width: 44px; height: 44px; }
 }
 .rm-add { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
 .rm-add svg { width: 16px; height: 16px; fill: currentColor; }

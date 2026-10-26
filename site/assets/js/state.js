@@ -24,11 +24,10 @@ export const store = {
   opponents: [],    // 선봉 추천용 상대 파티 [id]
   wild: [],         // 포획 추천: 야생 칸에서 나온 후보 [id] (최대 3)
   ball: 'poke',     // 포획 추천: 지금 쓰는 볼 (라운드에 따라 바뀜)
-  board: { pos: {}, dice: null, gate: 'off', heal: false },   // 칸 추천: 맵마다 지금 칸, 주사위, 메이즈 스위치, 회복 필요
+  starter: { id: null, gens: [] },   // 스타팅 추천: 고른 스타팅(진화 전 id), 드래프트에 나온 세대
   recent: [],
 };
 
-const DICE_OK = d => Number.isInteger(d) && d >= 1 && d <= 10;
 const listeners = new Set();
 const usageCache = new Map();
 let ctxCache = null;
@@ -49,12 +48,11 @@ export function initStore(dex, usageIndex, gameData) {
   store.opponents = sanitizeIds(storage.get('ppl.opponents', []));
   store.wild = sanitizeIds(storage.get('ppl.wild', [])).slice(0, 3);
   store.ball = ['poke', 'great', 'ultra'].includes(storage.get('ppl.ball', 'poke')) ? storage.get('ppl.ball', 'poke') : 'poke';
-  const board = storage.get('ppl.board', {});
-  store.board = {
-    pos: board.pos && typeof board.pos === 'object' ? board.pos : {},
-    dice: DICE_OK(board.dice) ? board.dice : null,
-    gate: board.gate === 'on' ? 'on' : 'off',
-    heal: !!board.heal,
+  const starter = storage.get('ppl.starter', {});
+  const starterIds = new Set(Object.values(store.gameData?.starters || {}).flat());
+  store.starter = {
+    id: starterIds.has(+starter.id) ? +starter.id : null,
+    gens: (Array.isArray(starter.gens) ? starter.gens : []).map(Number).filter(g => store.gameData?.starters?.[g]),
   };
   store.recent = storage.get('ppl.recent', []).filter(id => store.engine.byId.has(id)).slice(0, 8);
 }
@@ -70,7 +68,7 @@ function persist() {
   storage.set('ppl.opponents', store.opponents);
   storage.set('ppl.wild', store.wild);
   storage.set('ppl.ball', store.ball);
-  storage.set('ppl.board', store.board);
+  storage.set('ppl.starter', store.starter);
   storage.set('ppl.recent', store.recent);
 }
 

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "포켓몬 상성 탐색 & 실전 데이터 기반 파티 추천 웹 서비스",
+  "description": "포켓몬 상대 약점 찾기 & 「포켓몬 파티!」 파티 추천 웹 서비스",
   "scripts": {
     "data": "node scripts/build-pokedex.mjs && node scripts/build-usage.mjs && node scripts/build-sets.mjs",
     "data:pokedex": "node scripts/build-pokedex.mjs",

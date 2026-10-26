@@ -1,7 +1,20 @@
 // 추천 이유 표시 (파티 추천 · 포획 추천 공용): 이유 칩 + 사람이 읽는 코멘트
-import { store } from '../state.js';
+import { store, whereToFind } from '../state.js';
 import { esc, josa } from './dom.js';
 import { typeBadge } from './components.js';
+
+/** 추천 후보 → 파티에 넣을 모습: 진화 전으로만 잡히면 그 모습 + 진화 목표, 메가진화 후보면 메가 폼 */
+export function addPlan(c) {
+  const catchMon = !c.direct && c.from?.length ? c.from[0] : c.base;
+  return { id: catchMon.id, evo: catchMon.id !== c.base.id ? c.base.id : null, mega: c.mega ? c.mon.id : null };
+}
+
+/** 게임 모드: 후보를 어디서 잡는지 (진화 전으로만 잡히면 그 모습 + "잡아서 진화") */
+export function catchHint(c) {
+  const catchMon = !c.direct && c.from?.length ? c.from[0] : c.base;
+  const where = whereToFind(catchMon);
+  return catchMon.id !== c.base.id ? `${catchMon.ko} 잡아서 진화${where ? ` · ${where}` : ''}` : where || '';
+}
 
 /** 게임 도구 한글명 (게임 데이터에 없으면 slug) */
 export const itemName = slug => store.gameData?.itemNames[slug]?.[0] || slug;

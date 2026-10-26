@@ -15,7 +15,6 @@ import { DATA_DIR, loadTables, toId, writeJson } from './lib/pokeapi.mjs';
 import { loadMarshal } from './lib/marshal.mjs';
 import { decodePng } from './lib/png.mjs';
 import { ICON_FRAME, ICON_GRID, iconCells, packCells, cellsDiff, composeHud, hudTemplate } from './lib/icons.mjs';
-import { parseBoard } from './lib/game-board.mjs';
 import { buildMoves } from './lib/game-moves.mjs';
 
 const args = process.argv.slice(2);
@@ -145,9 +144,11 @@ function build({ dat, dex, sets, T }) {
   const MAP_POOL = { tour: 'area', board: 'type', outlet: 'all', island: 'gen', maze: 'color' };
   const maps = [...mapBlock.matchAll(/(\w+):\s*\{\s*name:\s*"([^"]+)"[\s\S]*?desc:\s*\[([^\]]*)\]/g)]
     .map(([, key, name, desc]) => ({ key, name, desc: [...desc.matchAll(/"([^"]+)"/g)].map(m => m[1]).join(' · '), pool: MAP_POOL[key] || 'all' }));
-  // 칸 표 (칸 추천): 맵마다 칸 좌표·종류·다음 칸·갈림길, 트레이너 타입, 야생 지역 이름 (색깔 지역은 pool 의 한글 색 이름으로)
-  const board = parseBoard(script);
-  board.colors = Object.fromEntries(Object.entries(board.colors).map(([k, c]) => [k, COLOR_KO[c] || null]));
+  // ── 스타팅: 세대별 3마리 (게임 시작 때 무작위 2개 세대의 6마리 중 드래프트로 고름) → { 세대: [dex id] } ──
+  const starters = {};
+  for (const [, gen, list] of block(script('Board_Game_Flow'), 'GENERATION_STARTERS', '{').matchAll(/(\d+)\s*=>\s*\[([^\]]*)\]/g)) {
+    starters[gen] = syms(list).map(sp => gameMon.get(sp)?.dex.id).filter(Boolean);
+  }
 
   // ── 기믹 룰 ──
   const ruleNames = Object.fromEntries([...block(shopSrc, 'RULE_NAMES', '{').matchAll(/(\w+):\s*"([^"]+)"/g)].map(m => [m[1], m[2]]));
@@ -310,7 +311,7 @@ function build({ dat, dex, sets, T }) {
     levelTable,
     tourneyShop,
     maps,
-    board,
+    starters,
     areas,
     pool,
     items,

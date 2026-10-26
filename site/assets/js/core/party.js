@@ -229,8 +229,8 @@ function allowed(st, c) {
  * @param members  prep 된 현재 파티 (locked 가 true 인 것만 유지)
  * @returns { party: prepped[], picks: Set<id>, alternatives: Map<id, [{c, score}]>, reasons: Map<id, reason[]> }
  */
-export function recommend(ctx, members, size = 6) {
-  const locked = members.filter(m => m.locked);
+/** 빔 서치: locked 를 고정하고 size 마리까지 채운 마지막 빔 (점수 높은 순, 서로 다른 조합) */
+function beamSearch(ctx, locked, size) {
   const slots = Math.max(0, size - locked.length);
   let beam = [stateOf(ctx, locked)];
   for (let step = 0; step < slots; step++) {
@@ -253,6 +253,28 @@ export function recommend(ctx, members, size = 6) {
       if (beam.length >= BEAM) break;
     }
   }
+  return beam;
+}
+
+/**
+ * 고정 멤버로 시작하는 추천 조합 여러 개 (스타팅 추천): 점수 높은 순, 조합끼리 최소 diff 마리는 달라야 함
+ * @returns [{ party: prepped[] (고정 멤버 먼저), score }]
+ */
+export function recommendTop(ctx, members, { size = 6, top = 3, diff = 2 } = {}) {
+  const locked = members.filter(m => m.locked);
+  const out = [];
+  for (const st of beamSearch(ctx, locked, size)) {
+    const ids = new Set(st.members.map(m => m.id));
+    if (out.some(o => o.party.filter(m => !ids.has(m.id)).length < diff)) continue;
+    out.push({ party: [...locked, ...st.members.filter(m => !locked.includes(m))], score: totalScore(ctx, st) });
+    if (out.length >= top) break;
+  }
+  return out;
+}
+
+export function recommend(ctx, members, size = 6) {
+  const locked = members.filter(m => m.locked);
+  const beam = beamSearch(ctx, locked, size);
   const final = beam[0];
   const picked = final.members.filter(m => !locked.includes(m));
   // 사용자가 넣은 순서를 유지하고 추천은 뒤에 붙인다

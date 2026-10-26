@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createEngine } from '../site/assets/js/core/engine.js';
-import { createContext, finalsOf, catchValue, recommendTypes, memberValues, bestSwaps, analyze } from '../site/assets/js/core/party.js';
+import { createContext, finalsOf, catchValue, recommendTypes, memberValues, bestSwaps, analyze, recommendTop } from '../site/assets/js/core/party.js';
 
 const load = p => JSON.parse(readFileSync(new URL(p, import.meta.url), 'utf8'));
 const dex = load('../site/data/pokedex.json');
@@ -72,4 +72,25 @@ test('6마리 교체 추천: 바꾸면 파티 점수가 오르고, 한 자리에
   const per = new Map();
   for (const x of swaps) per.set(x.i, (per.get(x.i) || 0) + 1);
   assert.ok([...per.values()].every(n => n <= 2));
+});
+
+test('스타팅 추천: 게임 스타팅 27마리마다 스타팅을 고정한 서로 다른 조합을 만든다', () => {
+  const ctx = ctxOf('normal');
+  const ids = Object.values(data.starters).flat();
+  assert.equal(ids.length, 27);
+  for (const id of ids.slice(0, 6)) {
+    const starter = engine.byId.get(id);
+    const fin = finalsOf(engine, data, starter)[0]?.mon || starter;
+    const lead = { ...ctx.prep(fin, { base: fin, from: [starter], direct: false }), locked: true };
+    const combos = recommendTop(ctx, [lead], { top: 3 });
+    assert.ok(combos.length >= 2, starter.ko);
+    for (const c of combos) {
+      assert.equal(c.party.length, 6);
+      assert.equal(c.party[0].mon.id, fin.id, '스타팅이 첫 자리');
+      assert.equal(new Set(c.party.map(m => m.sp)).size, 6, '같은 종 없음');
+    }
+    // 조합끼리 2마리 이상 다름
+    const [a, b] = combos;
+    assert.ok(b.party.filter(m => !a.party.some(x => x.id === m.id)).length >= 2);
+  }
 });

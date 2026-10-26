@@ -247,7 +247,7 @@ function toGameSet(b, pm, ref) {
 }
 
 /**
- * 추천 세팅 카드(상성 탐색)용: 못 배우는 기술 → 대신 쓸 기술, 못 구하는 도구 → 대신 쓸 도구.
+ * 추천 세팅 카드(상대 약점 찾기/포켓몬 검색)용: 못 배우는 기술 → 대신 쓸 기술, 못 구하는 도구 → 대신 쓸 도구.
  * @returns { moves: Map(원래 기술 → 대체 기술), item: [원래 도구, 대체 도구] | null } (기술 데이터가 없으면 null)
  */
 export function substitutesFor(mon, ref) {
