@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>포켓파티 랩 · 포켓몬 상성 & 파티 추천</title>
+  <meta name="description" content="포켓몬 이름만 입력하면 약점 타입을 알려주고, 내 포켓몬에 맞는 파티를 타입 상성과 실전 사용률 데이터로 추천해 주는 웹 서비스">
+  <meta property="og:title" content="포켓파티 랩 · 포켓몬 상성 & 파티 추천">
+  <meta property="og:description" content="상대 포켓몬 약점 탐색 · 실전 데이터 기반 파티 추천 · 타입 상성표">
+  <meta property="og:type" content="website">
+  <meta name="theme-color" content="#e3350d">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://raw.githubusercontent.com" crossorigin>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+  <link rel="stylesheet" href="assets/css/style.css">
+  <script>
+    // 첫 렌더 전에 테마 적용 (깜빡임 방지)
+    try { const t = localStorage.getItem('ppl.theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <script type="module" src="assets/js/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/matchup" aria-label="포켓파티 랩 홈">
+        <svg class="brand-ball" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="14.5" fill="#fff" stroke="currentColor" stroke-width="3"/>
+          <path d="M1.5 16a14.5 14.5 0 0 1 29 0z" fill="var(--accent)"/>
+          <path d="M1.5 16h29" stroke="currentColor" stroke-width="3"/>
+          <circle cx="16" cy="16" r="4.6" fill="#fff" stroke="currentColor" stroke-width="3"/>
+        </svg>
+        <span class="brand-text">포켓파티 랩<small>PokéParty Lab</small></span>
+      </a>
+      <nav class="tabs" aria-label="화면 전환">
+        <a href="#/matchup" data-tab="matchup">상성 탐색</a>
+        <a href="#/party" data-tab="party">파티 추천</a>
+        <a href="#/chart" data-tab="chart">타입 상성표</a>
+      </nav>
+      <div class="topbar-tools">
+        <label class="mode-select">
+          <span class="sr-only">데이터 기준</span>
+          <select id="mode-select" aria-label="데이터 기준"></select>
+        </label>
+        <button class="icon-btn" id="theme-toggle" type="button" aria-label="다크/라이트 모드 전환" title="테마 전환">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <div id="boot" class="boot">
+      <div class="boot-ball" aria-hidden="true"></div>
+      <p>포켓몬 데이터를 불러오는 중…</p>
+    </div>
+    <section id="view-matchup" class="view" hidden></section>
+    <section id="view-party" class="view" hidden></section>
+    <section id="view-chart" class="view" hidden></section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <p id="data-info">데이터: PokeAPI · Smogon 사용률 통계</p>
+      <p class="fine">
+        포켓몬 데이터 <a href="https://pokeapi.co" target="_blank" rel="noopener">PokeAPI</a> ·
+        실전 사용률 <a href="https://www.smogon.com/stats/" target="_blank" rel="noopener">Smogon University</a> ·
+        이미지 <a href="https://github.com/PokeAPI/sprites" target="_blank" rel="noopener">PokeAPI/sprites</a><br>
+        비공식 팬 프로젝트입니다. Pokémon 및 관련 명칭·이미지의 권리는 Nintendo · Creatures · GAME FREAK에 있습니다.
+      </p>
+    </div>
+  </footer>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
