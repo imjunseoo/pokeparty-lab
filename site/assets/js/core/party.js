@@ -317,6 +317,33 @@ export function memberValues(ctx, members) {
   });
 }
 
+/**
+ * 6마리 파티의 교체 추천: 멤버 하나를 후보 하나로 바꿨을 때 파티 점수가 가장 많이 오르는 조합 (같은 후보는 한 번만)
+ * @returns [{ i: 뺄 멤버 번호, c: 넣을 후보, gain, reasons }] (gain 큰 순)
+ */
+export function bestSwaps(ctx, members, { limit = 4, perMember = 2 } = {}) {
+  const base = totalScore(ctx, stateOf(ctx, members));
+  const all = [];
+  members.forEach((m, i) => {
+    const rest = stateOf(ctx, members.filter((_, j) => j !== i));
+    ctx.pool.filter(x => x.sp !== m.sp && allowed(rest, x))
+      .map(c => ({ i, c, gain: scoreWith(ctx, rest, c) - base, rest }))
+      .sort((a, b) => b.gain - a.gain).slice(0, limit)
+      .forEach(x => all.push(x));
+  });
+  // 같은 후보는 한 번만, 한 멤버에 대한 교체는 perMember 개까지 (잡을 수 있는 후보를 여럿 보여 주되 한 자리에만 몰리지 않게)
+  const seen = new Set(), count = new Map();
+  return all.sort((a, b) => b.gain - a.gain)
+    .filter(x => {
+      if (seen.has(x.c.sp) || (count.get(x.i) || 0) >= perMember) return false;
+      seen.add(x.c.sp);
+      count.set(x.i, (count.get(x.i) || 0) + 1);
+      return true;
+    })
+    .slice(0, limit)
+    .map(({ rest, ...x }) => ({ ...x, reasons: explain(ctx, rest, x.c) }));
+}
+
 /** 후보를 많이 잴 때 쓰는 미리 계산 (지금 파티 상태 · 한 마리씩 뺀 상태) */
 export function prepareCatch(ctx, members) {
   const st = stateOf(ctx, members);

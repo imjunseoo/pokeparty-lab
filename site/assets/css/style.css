@@ -427,6 +427,29 @@ button.type { border: 0; cursor: pointer; }
 .set-line .vals { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .set-line .vals em { font-style: normal; color: var(--faint); font-size: 12px; margin-left: 2px; }
 
+/* 6마리 완성 · 파티 평가 · 교체 추천 */
+.full-eval { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 20px; align-items: center; }
+.full-eval-main { display: grid; gap: 6px; min-width: 0; }
+.full-eval-main .note { margin: 0; }
+.full-eval-main .diag { margin: 4px 0 0; }
+.swap-title { margin: 16px 0 8px; font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.swap-list { display: grid; gap: 8px; }
+.swap { display: grid; grid-template-columns: minmax(0, 150px) auto minmax(0, 1fr); gap: 8px; align-items: center; }
+.swap-from { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 12px; border: 1px dashed var(--border-strong); opacity: .85; min-width: 0; }
+.swap-from img { width: 40px; height: 40px; }
+.swap-from > span { display: grid; gap: 1px; font-size: 13px; min-width: 0; }
+.swap-arrow { font-size: 18px; font-weight: 900; color: var(--accent); }
+.swap .rec-mon { grid-template-columns: 44px minmax(0, 1fr) auto; }
+.swap-gain { display: grid; justify-items: end; gap: 1px; font-size: 12px; color: var(--muted); font-weight: 700; white-space: nowrap; }
+.swap-gain b { font-size: 14px; color: var(--good); font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+  .full-eval { grid-template-columns: minmax(0, 1fr); justify-items: center; }
+  .full-eval-main { justify-self: stretch; }
+  .swap { grid-template-columns: minmax(0, 1fr); }
+  .swap-arrow { display: none; }
+  .swap-from { justify-self: start; }
+}
+
 /* 멤버 점수 */
 .member-rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .mr-row { display: grid; grid-template-columns: 26px 56px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); }

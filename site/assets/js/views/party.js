@@ -9,7 +9,7 @@ import { createPicker } from '../ui/picker.js';
 import { esc, on, toast, copyText, josa } from '../ui/dom.js';
 import { sprite, typeBadge, typeList, mult, ICONS, moveLabel, itemLabel, natureText, spreadText } from '../ui/components.js';
 import { ABILITY_EFFECTS } from '../core/engine.js';
-import { analyze, recommend, recommendTypes, explainSlot, explainCandidate, memberValues, alternativesFor } from '../core/party.js';
+import { analyze, recommend, recommendTypes, explainSlot, explainCandidate, memberValues, alternativesFor, bestSwaps } from '../core/party.js';
 import { orderedSets, setCard } from '../ui/sets.js';
 import { reasonChip, commentText, itemName } from '../ui/reasons.js';
 import { buildCard, readEditor, fillEditor, analyzeMember } from '../ui/builder.js';
@@ -272,6 +272,54 @@ function exampleHint(ctx, c) {
   return `종족값 ${ctx.stats(c.mon).reduce((a, b) => a + b, 0)}`;
 }
 
+/**
+ * 6마리 완성: 파티 평가(등급·강점·약점) + 교체 추천(멤버 하나를 바꾸면 파티 점수가 가장 많이 오르는 조합)
+ */
+function fullPartyCard(ctx, members, scope) {
+  const { engine } = store;
+  const a = analyze(ctx, members);
+  const s = a.scores;
+  const order = { danger: 0, warn: 1, info: 2, good: 3 };
+  const notes = [...a.diag].filter(d => d.level !== 'info' || d.types).sort((x, y) => order[x.level] - order[y.level]).slice(0, 4);
+  const verdict = s.total >= 85 ? '아주 균형 잡힌 파티예요. 세팅을 다듬는 데 집중하세요.'
+    : s.total >= 70 ? '좋은 파티예요. 아래 교체 한 번이면 더 단단해져요.'
+      : s.total >= 55 ? '약점이 조금 몰려 있어요. 아래 교체 추천을 노려 보세요.'
+        : '약점이 크게 겹쳐요. 교체 추천부터 노리는 걸 권해요.';
+  // 보여 주는 파티 점수(0~100) 순서와 맞게 정렬
+  const swaps = bestSwaps(ctx, members).filter(x => x.gain > 0.15)
+    .map(x => ({ ...x, after: analyze(ctx, members.map((m, j) => (j === x.i ? x.c : m))).scores }))
+    .sort((a, b) => b.after.total - a.after.total || b.gain - a.gain);
+  const swapHtml = swaps.map(x => {
+    const out = members[x.i];
+    const { after } = x;
+    const plan = addPlan(x.c);
+    return `<div class="swap">
+      <div class="swap-from">${sprite(out.base)}<span><b>${esc(out.base.ko)}</b><span class="note">빼고</span></span></div>
+      <span class="swap-arrow" aria-hidden="true">→</span>
+      <button class="rec-mon" type="button" data-replace="${x.i}" data-add="${plan.id}"${plan.evo ? ` data-evo="${plan.evo}"` : ''}${plan.mega ? ` data-mega="${plan.mega}"` : ''} title="이렇게 바꿔 보기">
+        ${sprite(x.c.mon)}
+        <span class="rm-main"><b>${esc(x.c.mon.ko)}</b>${typeList(engine, x.c.mon.t, 'sm')}
+          <span class="rm-why">${esc(commentText(engine, x.reasons, x.c))}</span>
+          <span class="rm-hint">${esc(exampleHint(ctx, x.c))}</span></span>
+        <span class="swap-gain"><b>${s.total} → ${after.total}</b><span>${s.grade} → ${after.grade}</span></span>
+      </button>
+    </div>`;
+  }).join('');
+  return `<div class="card-head"><h3>${ICONS.spark} 6마리 완성 · 파티 평가</h3><span class="sub">${esc(scope)} 교체 후보를 찾았어요</span></div>
+    <div class="full-eval">
+      <div class="grade g-${s.grade}" style="--p:${s.total}"><div><b>${s.grade}</b><span>${s.total}점</span></div></div>
+      <div class="full-eval-main">
+        <p class="catch-verdict">${esc(verdict)}</p>
+        <p class="note">방어 밸런스 ${s.def} · 공격 커버리지 ${s.off} (자속 기술로 상대 후보의 ${Math.round(s.seShare * 100)}%에게 효과 굉장)</p>
+        ${notes.length ? `<ul class="diag">${notes.map(d => `<li class="${d.level}"><span class="lv">${LEVEL_LABEL[d.level]}</span>
+          ${d.type ? typeBadge(engine, d.type, 'sm') : ''}${d.types ? `<span class="types">${d.types.map(t => typeBadge(engine, t, 'sm')).join('')}</span>` : ''}
+          <span>${esc(d.text)}</span></li>`).join('')}</ul>` : ''}
+      </div>
+    </div>
+    <h4 class="swap-title">교체 추천 <span class="note">한 마리만 바꿨을 때 파티 점수가 가장 많이 오르는 조합 · 누르면 바꿔 봐요</span></h4>
+    ${swapHtml ? `<div class="swap-list">${swapHtml}</div>` : '<p class="note">이 맵에서 잡을 수 있는 포켓몬 중에는 바꿔서 더 좋아지는 조합이 없어요. 아래 멤버별 세팅을 다듬어 보세요.</p>'}`;
+}
+
 function renderRec(ctx, members) {
   const { engine } = store;
   const scope = isGameMode()
@@ -280,8 +328,7 @@ function renderRec(ctx, members) {
   const head = (sub, buttons = '') => `<div class="card-head"><h3>${ICONS.spark} 다음에 노릴 속성</h3>
     <span class="sub">${esc(sub)}</span>${buttons}</div>`;
   if (store.party.length >= 6) {
-    recEl.innerHTML = `${head('파티 6마리 완성!')}
-      <p class="note">아래에서 멤버별 세팅과 약점을 확인하세요. 바꾸고 싶은 포켓몬을 빼면(✕) 그 자리에 맞는 속성을 다시 추천해요.</p>`;
+    recEl.innerHTML = fullPartyCard(ctx, members, scope);
     return;
   }
   const recs = recommendTypes(ctx, members, { limit: 6 });
@@ -330,7 +377,7 @@ function renderAnalysis(ctx, members) {
   analysisEl.innerHTML = [
     rankCard(ctx, members),
     setsCard(members),
-    scoreCard(a, members),
+    members.length < 6 ? scoreCard(a, members) : '',   // 6마리면 위의 "6마리 완성 · 파티 평가"에 등급이 있음
     diagCard(a),
     `<details class="deep card" id="p-deep" ${deepOpen ? 'open' : ''}>
       <summary><h3>상세 상성 분석</h3><span class="sub">자속 공격 커버리지 · 방어 상성표</span></summary>

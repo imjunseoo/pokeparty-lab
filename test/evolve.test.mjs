@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createEngine } from '../site/assets/js/core/engine.js';
-import { createContext, finalsOf, catchValue, recommendTypes, memberValues } from '../site/assets/js/core/party.js';
+import { createContext, finalsOf, catchValue, recommendTypes, memberValues, bestSwaps, analyze } from '../site/assets/js/core/party.js';
 
 const load = p => JSON.parse(readFileSync(new URL(p, import.meta.url), 'utf8'));
 const dex = load('../site/data/pokedex.json');
@@ -56,4 +56,20 @@ test('멤버 기여도: 약점이 겹치는 멤버는 기여가 낮고, 빼면 �
   const by = slug => v[mixed.findIndex(m => m.mon.slug === slug)];
   assert.ok(by('quagsire').synergy > by('delphox').synergy, '땅 약점을 받아주는 누오가 약점을 더하는 마폭시보다 기여가 크다');
   assert.ok(v.every(x => Array.isArray(x.reasons)));
+});
+
+test('6마리 교체 추천: 바꾸면 파티 점수가 오르고, 한 자리에 몰리지 않으며, 같은 종은 넣지 않는다', () => {
+  const ctx = ctxOf('normal');
+  const six = ['delphox', 'luxray', 'iron-crown', 'quagsire', 'sableye', 'vivillon'].map(s => ctx.prep(mon(s)));
+  const swaps = bestSwaps(ctx, six);
+  assert.ok(swaps.length >= 2);
+  const party = new Set(six.map(m => m.sp));
+  for (const x of swaps) {
+    assert.ok(x.gain > 0 && !party.has(x.c.sp));
+    const before = analyze(ctx, six).scores.total, after = analyze(ctx, six.map((m, j) => (j === x.i ? x.c : m))).scores.total;
+    assert.ok(after >= before, `${six[x.i].mon.ko} → ${x.c.mon.ko}`);
+  }
+  const per = new Map();
+  for (const x of swaps) per.set(x.i, (per.get(x.i) || 0) + 1);
+  assert.ok([...per.values()].every(n => n <= 2));
 });
