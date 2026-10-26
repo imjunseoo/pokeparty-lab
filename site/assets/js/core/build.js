@@ -59,10 +59,10 @@ const STATUS_VALUE = {
 };
 const DOUBLES_STATUS = { protect: 4, detect: 3, 'follow-me': 4, 'rage-powder': 4, 'helping-hand': 2, tailwind: 3, 'trick-room': 3, 'wide-guard': 2 };
 // 능력 올리기 기술: 물리 공격용 · 특수 공격용 (공격 기술과 맞지 않으면 가치 없음, 하나만 인정)
-const SETUP_PHYS = new Set(['swords-dance', 'dragon-dance', 'bulk-up', 'coil', 'hone-claws', 'curse', 'belly-drum', 'victory-dance', 'tidy-up', 'shift-gear', 'howl', 'no-retreat']);
-const SETUP_SPEC = new Set(['nasty-plot', 'calm-mind', 'quiver-dance', 'tail-glow', 'geomancy']);
-const SETUP_BOTH = new Set(['shell-smash', 'work-up', 'growth', 'clangorous-soul', 'fillet-away']);
-const RECOVERY = new Set(['recover', 'roost', 'slack-off', 'soft-boiled', 'milk-drink', 'moonlight', 'morning-sun', 'synthesis', 'shore-up', 'wish', 'heal-order', 'strength-sap', 'rest']);
+export const SETUP_PHYS = new Set(['swords-dance', 'dragon-dance', 'bulk-up', 'coil', 'hone-claws', 'curse', 'belly-drum', 'victory-dance', 'tidy-up', 'shift-gear', 'howl', 'no-retreat']);
+export const SETUP_SPEC = new Set(['nasty-plot', 'calm-mind', 'quiver-dance', 'tail-glow', 'geomancy']);
+export const SETUP_BOTH = new Set(['shell-smash', 'work-up', 'growth', 'clangorous-soul', 'fillet-away']);
+export const RECOVERY = new Set(['recover', 'roost', 'slack-off', 'soft-boiled', 'milk-drink', 'moonlight', 'morning-sun', 'synthesis', 'shore-up', 'wish', 'heal-order', 'strength-sap', 'rest']);
 // 쓰고 나서의 손해 (턴·능력치·실패 확률) → 기대 화력 배율
 const FX_MULT = { recharge: 0.6, selfko: 0.35, cond: 0.3, first: 0.25, drop: 0.8, lock: 0.9, recoil: 0.92, knock: 1.5 };
 // 데미지 밖의 쓸모가 있는 공격기

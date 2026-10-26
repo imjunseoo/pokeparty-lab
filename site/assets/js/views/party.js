@@ -12,7 +12,9 @@ import { ABILITY_EFFECTS } from '../core/engine.js';
 import { analyze, recommend, recommendTypes, explainSlot, explainCandidate, memberValues, alternativesFor, bestSwaps } from '../core/party.js';
 import { orderedSets, setCard } from '../ui/sets.js';
 import { reasonChip, commentText, itemName } from '../ui/reasons.js';
-import { buildCard, readEditor, fillEditor, analyzeMember } from '../ui/builder.js';
+import { buildCard, readEditor, fillEditor, analyzeMember, pickSet, pickedSet, selectedTarget } from '../ui/builder.js';
+import { bindSearchSelects } from '../ui/searchselect.js';
+import { describeSet, refSource } from '../ui/setdesc.js';
 
 // 사용자가 처음 보여준 예시 파티 (Gemini 예시 코드의 파티 구성)
 const EXAMPLE = ['delphox', 'luxray', 'iron-crown', 'quagsire', 'sableye', 'vivillon'];
@@ -117,10 +119,17 @@ export function initParty(el) {
   });
   on(root, 'click', '[data-act="set-fill"]', (e, el) => {
     const i = +el.dataset.i;
-    const r = analyzeMember(store.party[i], partyMembers(getContext())[i]);
-    if (r) fillEditor(el.closest('form'), r.best);
-    toast('최선 세팅을 채웠어요 · 실제와 다르면 고친 뒤 저장하세요');
+    const t = selectedTarget(i, store.party[i], partyMembers(getContext())[i]);
+    if (t) fillEditor(el.closest('form'), t.set);
+    toast(`${t?.title || '세팅'}을 채웠어요 · 실제와 다르면 고친 뒤 저장하세요`);
   });
+  // 멤버 카드의 세팅 버튼 (최선 ↔ 참고 추천 세팅)
+  on(root, 'click', '[data-pick-set]', (e, el) => {
+    const [i, key] = el.dataset.pickSet.split(':');
+    pickSet(+i, key);
+    renderParty();
+  });
+  bindSearchSelects(root);
   root.addEventListener('submit', e => {
     const form = e.target.closest('.set-editor');
     if (!form) return;
@@ -457,26 +466,19 @@ function rankCard(ctx, members) {
   </section>`;
 }
 
-/** 실전 통계에 없는 멤버: 추천 세팅(Smogon → 랜덤배틀 → 자체 생성) + 다른 세팅 펼치기 */
-function recommendedCard(m) {
+/** 실전 통계에 없는 멤버: 추천 세팅(Smogon → 랜덤배틀 → 자체 생성)을 버튼으로 바꿔 보기 + 한 줄 설명 */
+function recommendedCard(m, i) {
   const { engine, sets } = store;
   const head = `<header>${sprite(m.mon)}<span>${esc(m.mon.ko)}</span></header>`;
   if (!sets) return `<div class="set-card">${head}<p class="note">추천 세팅 불러오는 중…</p></div>`;
-  const [first, ...rest] = orderedSets(sets, m.id, setsOrder());
-  if (!first) return `<div class="set-card">${head}<p class="note">세팅 정보가 없어요.</p></div>`;
-  const opts = { mode: store.mode, game: gameOpts() };
-  const more = rest.length
-    ? `<details class="more-sets"><summary>다른 세팅 ${rest.length}개</summary>${rest.map(s => setCard(engine, sets, m.mon, s, { ...opts, header: false })).join('')}</details>`
-    : '';
-  return setCard(engine, sets, m.mon, first, { ...opts, extra: more });
-}
-
-/** 참고용 추천 세팅 전부 (게임 모드 멤버 카드 안에 접어 둠) */
-function recommendedList(m) {
-  const { engine, sets } = store;
-  if (!sets) return '<p class="note">추천 세팅 불러오는 중…</p>';
-  const opts = { mode: store.mode, game: gameOpts(), header: false };
-  return orderedSets(sets, m.id, setsOrder()).map(s => setCard(engine, sets, m.mon, s, opts)).join('') || '';
+  const list = orderedSets(sets, m.id, setsOrder());
+  if (!list.length) return `<div class="set-card">${head}<p class="note">세팅 정보가 없어요.</p></div>`;
+  const sel = list.find(s => s.key === pickedSet(i)) || list[0];
+  const tabs = list.length > 1 ? `<div class="set-tabs" role="tablist" aria-label="세팅 고르기">${list.map(s => `
+    <button type="button" role="tab" class="set-tab ${s === sel ? 'on' : ''}" aria-selected="${s === sel}" data-pick-set="${i}:${s.key}">${esc(`${refSource(s)} · ${describeSet(m.mon, s, { double: battleMode() === 'double' || s.key === 'D' }).role}`)}</button>`).join('')}</div>` : '';
+  return setCard(engine, sets, m.mon, sel, {
+    mode: store.mode, game: gameOpts(), tabs, desc: describeSet(m.mon, sel, { double: battleMode() === 'double' || sel.key === 'D' }),
+  });
 }
 
 function setsCard(members) {
@@ -486,16 +488,16 @@ function setsCard(members) {
   if (isGameMode()) {
     // 「포켓몬 파티!」: 배울 수 있는 기술·구할 수 있는 도구로 계산한 최선 세팅 + 내 세팅 입력 → 할 일
     if (!store.moves) loadMoves();
-    const cards = members.map((m, i) => buildCard(i, store.party[i], m, { editing: editing === i, recommended: recommendedList(m) })).join('');
+    const cards = members.map((m, i) => buildCard(i, store.party[i], m, { editing: editing === i, recommended: recommendedCard(m, i) })).join('');
     return `
     <section class="card">
       <div class="card-head"><h3>멤버별 세팅</h3><span class="sub">${esc(`${gameRule().name} · ${battleMode() === 'double' ? '더블' : '싱글'} · Lv.${store.gameData.finalLevel} 기준 · 「내 세팅 입력」으로 지금 세팅을 넣으면 최선까지 할 일을 알려줘요`)}</span></div>
       <div class="sets">${cards}</div>
     </section>`;
   }
-  const cards = members.map(m => {
+  const cards = members.map((m, i) => {
     const u = m.u;
-    if (!u) return recommendedCard(m);
+    if (!u) return recommendedCard(m, i);
     return `<div class="set-card">
       <header>${sprite(m.mon)}<span>${esc(m.mon.ko)}</span><span class="pill-soft accent">실전 ${u.r}위 · ${u.u}%</span></header>
       <div class="set-src"><b>실전 통계</b><span>${esc(info.label)} ${esc(info.month)} · 레이팅 ${info.cutoff}+</span></div>

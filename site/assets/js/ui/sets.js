@@ -35,8 +35,9 @@ export function gameItemSet(data, rule) {
  * opts.mode   : 데이터 기준 (챔피언스면 테라 숨김·노력치 안내)
  * opts.game   : { data, rule } 「포켓몬 파티!」 모드일 때
  * opts.header : 포켓몬 이름 머리줄 포함 여부, opts.extra: 카드 끝에 덧붙일 HTML
+ * opts.tabs   : 다른 세팅으로 바꾸는 버튼 줄 HTML, opts.desc: { role, line } 한 줄 설명 (ui/setdesc.js)
  */
-export function setCard(engine, setsData, mon, set, { mode, game = null, header = true, extra = '' } = {}) {
+export function setCard(engine, setsData, mon, set, { mode, game = null, header = true, extra = '', tabs = '', desc = null } = {}) {
   const line = (label, vals) => (vals ? `<div class="set-line"><span>${label}</span><span class="vals">${vals}</span></div>` : '');
   const illegal = new Set(game?.data.illegal[mon.id] || []);
   const allowed = game ? gameItemSet(game.data, game.rule) : null;
@@ -62,7 +63,9 @@ export function setCard(engine, setsData, mon, set, { mode, game = null, header 
 
   return `<div class="set-card">
     ${header ? `<header>${sprite(mon)}<span>${esc(mon.ko)}</span><span class="pill-soft">추천 세팅</span></header>` : ''}
+    ${tabs}
     <div class="set-src"><b>${esc(set.n)}</b><span>${esc(set.src)}</span></div>
+    ${desc ? `<p class="set-why"><b>${esc(desc.role)}</b> ${esc(desc.line)}</p>` : ''}
     ${line('특성', abilities)}
     ${line('도구', items)}
     ${line(set.pool ? '기술 후보' : '기술', moves)}

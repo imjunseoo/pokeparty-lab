@@ -427,6 +427,26 @@ button.type { border: 0; cursor: pointer; }
 .set-line .vals { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .set-line .vals em { font-style: normal; color: var(--faint); font-size: 12px; margin-left: 2px; }
 
+/* 세팅 버튼 · 한 줄 설명 */
+.set-tabs { display: flex; flex-wrap: wrap; gap: 5px; }
+.set-tab { border: 1px solid var(--border-strong); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 4px 10px; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-tab:hover { border-color: var(--accent); color: var(--text); }
+.set-tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.set-why { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--muted); }
+.set-why b { color: var(--text); margin-right: 4px; }
+
+/* 검색해서 고르는 입력칸 (내 세팅 입력) */
+.ss { position: relative; min-width: 0; }
+.ss-input { width: 100%; font-size: 13px; padding: 5px 8px; }
+.ss-list { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px; list-style: none; max-height: 260px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .18); }
+.ss-list li { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 7px; cursor: pointer; font-size: 13px; color: var(--text); font-weight: 600; }
+.ss-list li[aria-selected="true"] { background: var(--accent-soft); }
+.ss-list li.cur .ss-label::after { content: ' ✓'; color: var(--accent); }
+.ss-sub { font-size: 11.5px; color: var(--faint); font-weight: 600; white-space: nowrap; }
+.ss-list .ss-none { color: var(--faint); cursor: default; justify-content: center; }
+.se-tip { margin: -2px 0 0; }
+
 /* 6마리 완성 · 파티 평가 · 교체 추천 */
 .full-eval { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 20px; align-items: center; }
 .full-eval-main { display: grid; gap: 6px; min-width: 0; }
