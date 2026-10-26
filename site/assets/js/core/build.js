@@ -24,7 +24,7 @@ export const NATURES = {
 };
 
 // 공격 타입을 올리는 도구 (×1.2)
-const TYPE_ITEMS = {
+export const TYPE_ITEMS = {
   charcoal: 'fire', 'mystic-water': 'water', magnet: 'electric', 'miracle-seed': 'grass', 'never-melt-ice': 'ice',
   'black-belt': 'fighting', 'poison-barb': 'poison', 'soft-sand': 'ground', 'sharp-beak': 'flying', 'twisted-spoon': 'psychic',
   'silver-powder': 'bug', 'hard-stone': 'rock', 'spell-tag': 'ghost', 'dragon-fang': 'dragon', 'black-glasses': 'dark',
@@ -35,7 +35,7 @@ const TYPE_ITEMS = {
   'iron-plate': 'steel', 'pixie-plate': 'fairy',
 };
 // 계산에 반영하는 도구 (이 밖의 도구는 추천 세팅에 자주 나오면 가치를 준다)
-const MODELED_ITEMS = new Set([...Object.keys(TYPE_ITEMS), 'choice-band', 'choice-specs', 'choice-scarf', 'life-orb', 'expert-belt',
+export const MODELED_ITEMS = new Set([...Object.keys(TYPE_ITEMS), 'choice-band', 'choice-specs', 'choice-scarf', 'life-orb', 'expert-belt',
   'muscle-band', 'wise-glasses', 'punching-glove', 'loaded-dice', 'power-herb', 'assault-vest', 'leftovers', 'sitrus-berry',
   'focus-sash', 'eviolite', 'light-ball', 'thick-club', 'black-sludge']);
 const CHOICE = new Set(['choice-band', 'choice-specs', 'choice-scarf']);

@@ -434,6 +434,12 @@ button.type { border: 0; cursor: pointer; }
 .set-tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .set-why { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--muted); }
 .set-why b { color: var(--text); margin-right: 4px; }
+/* 대체 기술·도구 */
+.sub-mark { display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 5px; font-size: 10.5px; font-weight: 800; background: var(--info-soft); color: var(--info); vertical-align: 1px; }
+.is-sub { font-weight: 700; }
+.sub-arrow { margin: 0 3px 0 2px; color: var(--faint); font-weight: 800; }
+.sub-note { margin: 0; color: var(--muted); }
+.sub-note b { color: var(--info); margin-right: 4px; }
 
 /* 검색해서 고르는 입력칸 (내 세팅 입력) */
 .ss { position: relative; min-width: 0; }

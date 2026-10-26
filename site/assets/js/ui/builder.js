@@ -2,11 +2,11 @@
 import { store, getBuilder, gameRule, allowedItems, setsOrder } from '../state.js';
 import { esc, josa } from './dom.js';
 import { sprite } from './components.js';
-import { NATURES } from '../core/build.js';
+import { NATURES, TYPE_ITEMS, MODELED_ITEMS } from '../core/build.js';
 import { STAT_LABELS } from '../core/engine.js';
 import { itemName } from './reasons.js';
 import { orderedSets } from './sets.js';
-import { describeSet, refSource, setNameKo } from './setdesc.js';
+import { describeSet, refSource, setNameKo, moveGroup } from './setdesc.js';
 import { searchSelect, defineOptions, setSearchValue } from './searchselect.js';
 
 const CLS = ['변화', '물리', '특수'];
@@ -47,10 +47,13 @@ export function analyzeMember(m, pm) {
 }
 
 const line = (label, vals) => (vals ? `<div class="set-line"><span>${label}</span><span class="vals">${vals}</span></div>` : '');
-const moveChip = slug => {
+/** 기술 칩. sub: 대신하는 원래 기술 이름이 있으면 "대체" 표시 */
+const moveChip = (slug, sub = null) => {
   const mv = store.moves?.bySlug.get(slug);
-  return mv ? `<span><span class="dot t-${mv.type}" title="${esc(store.engine.typeKo(mv.type))}"></span>${esc(mv.ko)}<span class="cls">${CLS[mv.cat]}</span></span>` : `<span>${esc(slug)}</span>`;
+  const mark = sub ? `<span class="sub-mark" title="못 배우는 ${esc(sub)} 대신">대체</span>` : '';
+  return mv ? `<span${sub ? ' class="is-sub"' : ''}><span class="dot t-${mv.type}" title="${esc(store.engine.typeKo(mv.type))}"></span>${esc(mv.ko)}<span class="cls">${CLS[mv.cat]}</span>${mark}</span>` : `<span>${esc(slug)}</span>`;
 };
+const moveKo = slug => store.moves?.bySlug.get(slug)?.ko || store.sets?.moves[slug]?.[0] || slug;
 export const natureLabel = slug => {
   const n = NATURES[slug];
   if (!n) return '—';
@@ -61,10 +64,11 @@ const ivText = iv => {
   return top.length === 6 ? '전부 31' : top.length ? `${top.join('·')} 31 <em>나머지 20</em>` : '전부 20 <em>기본</em>';
 };
 
-/** 세팅 한 덩어리 (기술·도구·특성·성격·개체값) */
-function setLines(set, ab) {
-  return line('기술', set.mv.length ? set.mv.map(moveChip).join('') : '<span class="faint">입력 안 함</span>')
-    + line('도구', set.it ? esc(itemName(set.it)) : '<span class="faint">없음</span>')
+/** 세팅 한 덩어리 (기술·도구·특성·성격·개체값). subs: 대체한 기술 [[원래, 대체]], itemSub: [원래 도구, 대체 도구] */
+function setLines(set, ab, { subs = [], itemSub = null } = {}) {
+  const subOf = new Map(subs.map(([orig, sub]) => [sub, moveKo(orig)]));
+  return line('기술', set.mv.length ? set.mv.map(s => moveChip(s, subOf.get(s))).join('') : '<span class="faint">입력 안 함</span>')
+    + line('도구', set.it ? `${esc(itemName(set.it))}${itemSub?.[1] === set.it ? `<span class="sub-mark" title="못 구하는 ${esc(itemName(itemSub[0]))} 대신">대체</span>` : ''}` : '<span class="faint">없음</span>')
     + line('특성', ab ? esc(store.engine.abilityKo(ab)) : '')
     + line('성격', natureLabel(set.na))
     + line('개체값', ivText(set.iv || NO_IV));
@@ -109,18 +113,78 @@ function todoHtml(t) {
   </div>`;
 }
 
+// 도구 묶음 (대체 도구 찾기용): 화력 · 스피드 · 내구 · 그 밖
+const POWER_ITEMS = new Set([...Object.keys(TYPE_ITEMS), 'choice-band', 'choice-specs', 'life-orb', 'expert-belt', 'muscle-band',
+  'wise-glasses', 'loaded-dice', 'punching-glove', 'booster-energy', 'weakness-policy', 'light-ball', 'thick-club']);
+const SPEED_ITEMS = new Set(['choice-scarf', 'quick-claw']);
+const BULK_ITEMS = new Set(['leftovers', 'black-sludge', 'sitrus-berry', 'assault-vest', 'rocky-helmet', 'eviolite', 'heavy-duty-boots',
+  'focus-sash', 'covert-cloak', 'shell-bell', 'big-root', 'protective-pads']);
+const itemClass = it => (POWER_ITEMS.has(it) ? 'power' : SPEED_ITEMS.has(it) ? 'speed' : BULK_ITEMS.has(it) ? 'bulk' : 'other');
+
+/** 기술 정보 (이 게임 기술 표에 없으면 추천 세팅 사전) */
+const refMove = slug => {
+  const g = store.moves.bySlug.get(slug);
+  if (g) return g;
+  const s = store.sets?.moves[slug];
+  return s ? { slug, ko: s[0], type: s[2], cat: s[3], power: 0 } : { slug, ko: slug, type: null, cat: 0, power: 0 };
+};
+
 /**
- * 추천 세팅(Smogon·랜덤배틀) → 이 게임에서 쓸 수 있는 세팅. 못 배우는 기술·못 구하는 도구는 빼고,
+ * 못 배우는 기술 대신 쓸 기술: 같은 역할의 변화기(랭크업·회복·설치·상태이상·교체…) →
+ * 같은 타입·같은 분류 공격기 → 같은 타입 공격기 → 같은 분류 공격기 순으로 찾고, 그중 세팅 점수가 가장 높은 것.
+ */
+function substituteMove(b, pm, set, orig, learnList) {
+  const info = refMove(orig);
+  // 잠재파워는 이 게임에선 개체값으로 타입이 정해져서(데이터상 노말) 대체로 쓰지 않음
+  const cands = learnList.filter(m => !set.mv.includes(m.slug) && m.slug !== 'hidden-power');
+  const group = moveGroup(orig);
+  const tiers = [
+    group ? cands.filter(m => moveGroup(m.slug) === group) : [],
+    info.cat > 0 ? cands.filter(m => m.type === info.type && m.cat === info.cat && m.power > 0) : [],
+    info.cat > 0 ? cands.filter(m => m.type === info.type && m.cat > 0 && m.power > 0) : [],
+    info.cat > 0 ? cands.filter(m => m.cat === info.cat && m.power > 0) : [],
+  ];
+  const pool = tiers.find(t => t.length) || [];
+  let best = null;
+  for (const m of pool) {
+    const v = b.evaluate(pm.mon, { ...set, mv: [...set.mv, m.slug] }).score;
+    if (!best || v > best.v) best = { v, slug: m.slug };
+  }
+  return best?.slug || null;
+}
+
+/**
+ * 못 구하는 도구 대신 쓸 도구: 같은 묶음(화력·스피드·내구) 중 세팅 점수가 가장 높은 것.
+ * 메가스톤·Z크리스탈처럼 룰에 따라 못 쓰는 도구는 화력·스피드·내구 도구 전체에서 고른다.
+ */
+function substituteItem(b, pm, set, orig, allowed) {
+  const cls = itemClass(orig);
+  const general = i => MODELED_ITEMS.has(i) && itemClass(i) !== 'other';
+  let pool = cls === 'other' ? [...allowed].filter(general) : [...allowed].filter(i => itemClass(i) === cls && MODELED_ITEMS.has(i));
+  if (!pool.length) pool = [...allowed].filter(general);
+  let best = null;
+  for (const it of pool) {
+    const v = b.evaluate(pm.mon, { ...set, it }).score;
+    if (!best || v > best.v) best = { v, it };
+  }
+  return best?.it || null;
+}
+
+/**
+ * 추천 세팅(Smogon·랜덤배틀) → 이 게임에서 쓸 수 있는 세팅. 못 배우는 기술·못 구하는 도구는 대체 기술·도구로 바꾸고,
  * 기술 후보 중에서 고르는 역할 세팅(pool)은 점수가 가장 높은 4개 조합.
+ * @returns { set, subs: [[원래 기술, 대체 기술]], dropped: [대체도 없는 기술], itemSub: [원래 도구, 대체 도구] | null, itemMissing }
  */
 function toGameSet(b, pm, ref) {
-  const learn = new Set(b.learnable(pm.mon).map(m => m.slug));
+  const learnList = b.learnable(pm.mon);
+  const learn = new Set(learnList.map(m => m.slug));
   const slots = (ref.mv || []).map(s => (Array.isArray(s) ? s : [s]));
   const dropped = [];
   let mv = [];
   if (ref.pool) {
     const cands = [...new Set(slots.flat())].filter(s => learn.has(s));
-    dropped.push(...[...new Set(slots.flat())].filter(s => !learn.has(s)));
+    // 후보에서 4개를 고르는 세팅: 고를 후보가 4개보다 적을 때만 못 배우는 기술을 대체
+    if (cands.length < 4) dropped.push(...[...new Set(slots.flat())].filter(s => !learn.has(s)).slice(0, 4 - cands.length));
     mv = cands.slice(0, 4);
     if (cands.length > 4) {
       let best = -Infinity;
@@ -143,16 +207,48 @@ function toGameSet(b, pm, ref) {
   const allowed = allowedItems() || new Set();
   const items = (Array.isArray(ref.it) ? ref.it : [ref.it]).filter(Boolean);
   const abilities = store.engine.abilitiesOf(pm.mon);
-  return {
-    set: {
-      lv: store.gameData.finalLevel, mv: mv.slice(0, 4), iv: ALL_IV,
-      it: pm.stone || items.find(x => allowed.has(x)) || null,
-      ab: (ref.ab || []).find(a => abilities.includes(a)) || pm.ability,
-      na: (ref.na || []).find(n => NATURES[n]) || 'hardy',
-    },
-    dropped,
-    itemMissing: !pm.stone && items.length && !items.some(x => allowed.has(x)) ? items[0] : null,
+  const set = {
+    lv: store.gameData.finalLevel, mv: mv.slice(0, 4), iv: ALL_IV,
+    it: pm.stone || items.find(x => allowed.has(x)) || null,
+    ab: (ref.ab || []).find(a => abilities.includes(a)) || pm.ability,
+    na: (ref.na || []).find(n => NATURES[n]) || 'hardy',
   };
+  // 못 구하는 도구 → 대체 도구 (기술보다 먼저: 도구에 따라 좋은 기술이 달라짐)
+  const itemMissing = !pm.stone && items.length && !items.some(x => allowed.has(x)) ? items[0] : null;
+  let itemSub = null;
+  if (itemMissing) {
+    const sub = substituteItem(b, pm, set, itemMissing, allowed);
+    if (sub) { set.it = sub; itemSub = [itemMissing, sub]; }
+  }
+  // 못 배우는 기술 → 대체 기술 (빈 자리만큼)
+  const subs = [], left = [];
+  for (const orig of dropped) {
+    const sub = set.mv.length < 4 ? substituteMove(b, pm, set, orig, learnList) : null;
+    if (sub) { set.mv = [...set.mv, sub]; subs.push([orig, sub]); } else left.push(orig);
+  }
+  return { set, subs, dropped: left, itemSub, itemMissing: itemSub ? null : itemMissing };
+}
+
+/**
+ * 추천 세팅 카드(상성 탐색)용: 못 배우는 기술 → 대신 쓸 기술, 못 구하는 도구 → 대신 쓸 도구.
+ * @returns { moves: Map(원래 기술 → 대체 기술), item: [원래 도구, 대체 도구] | null } (기술 데이터가 없으면 null)
+ */
+export function substitutesFor(mon, ref) {
+  const b = getBuilder();
+  if (!b) return null;
+  let map = results.get(b);
+  if (!map) results.set(b, (map = new Map()));
+  const key = `subs|${mon.id}|${ref.key}`;
+  if (!map.has(key)) {
+    const pm = { mon, base: mon, ability: store.engine.defaultAbility(mon), stone: null };
+    const g = toGameSet(b, pm, ref);
+    const info = slug => { const m = store.moves.bySlug.get(slug); return { slug, ko: m.ko, type: m.type, cat: m.cat }; };
+    map.set(key, {
+      moves: new Map(g.subs.map(([orig, sub]) => [orig, info(sub)])),
+      item: g.itemSub ? [g.itemSub[0], { slug: g.itemSub[1], ko: itemName(g.itemSub[1]) }] : null,
+    });
+  }
+  return map.get(key);
 }
 
 /** 고를 수 있는 목표 세팅: 계산한 최선 + 참고 추천 세팅들 (멤버 모습·특성이 같으면 다시 계산하지 않음) */
@@ -164,8 +260,10 @@ function targetOptions(b, pm, r) {
     const refs = [];
     for (const ref of store.sets ? orderedSets(store.sets, pm.mon.id, setsOrder()) : []) {
       const g = toGameSet(b, pm, ref);
-      const { role } = describeSet(pm.mon, ref, { double: store.game.battle === 'double' || ref.key === 'D' });
-      refs.push({ key: ref.key, chip: `${refSource(ref)} · ${role}`, title: `${role} 세팅`, src: `${ref.src} · ${setNameKo(ref.n)}`, ref, ...g, top: b.evaluate(pm.mon, g.set) });
+      // 설명은 이 게임에서 실제로 쓰는 기술·도구(대체 포함)로, 노력치·성격은 원래 세팅 그대로
+      const used = { ...ref, mv: g.set.mv, it: [g.set.it].filter(Boolean) };
+      const { role } = describeSet(pm.mon, used, { double: store.game.battle === 'double' || ref.key === 'D' });
+      refs.push({ key: ref.key, chip: `${refSource(ref)} · ${role}`, title: `${role} 세팅`, src: `${ref.src} · ${setNameKo(ref.n)}`, ref: used, ...g, top: b.evaluate(pm.mon, g.set) });
     }
     map.set(key, refs);
   }
@@ -285,7 +383,9 @@ export function buildCard(i, m, pm, { editing = false, recommended = '' } = {}) 
   const sel = opts.find(o => o.key === picked.get(i)) || opts[0];
   const ev = sel.top || b.evaluate(pm.mon, sel.set);
   const desc = describeSet(pm.mon, sel.ref || sel.set, { double: store.game.battle === 'double' || sel.key === 'D' });
-  const lost = [...sel.dropped.map(s => store.moves.bySlug.get(s)?.ko || store.sets?.moves[s]?.[0] || s), sel.itemMissing && itemName(sel.itemMissing)].filter(Boolean);
+  // 대체한 것 · 대체도 못 찾아 뺀 것
+  const swapped = [...(sel.subs || []).map(([o, s]) => `${moveKo(o)} → ${moveKo(s)}`), sel.itemSub && `${itemName(sel.itemSub[0])} → ${itemName(sel.itemSub[1])}`].filter(Boolean);
+  const lost = [...sel.dropped.map(moveKo), sel.itemMissing && itemName(sel.itemMissing)].filter(Boolean);
   const tabs = opts.length > 1 ? `<div class="set-tabs" role="tablist" aria-label="세팅 고르기">${opts.map(o => `
       <button type="button" role="tab" class="set-tab ${o === sel ? 'on' : ''}" aria-selected="${o === sel}" data-pick-set="${i}:${o.key}">${esc(o.chip)}</button>`).join('')}</div>` : '';
   const target = m.set && !editing ? todoHtml({
@@ -300,8 +400,9 @@ export function buildCard(i, m, pm, { editing = false, recommended = '' } = {}) 
     <div class="build-block best">
       <div class="set-src"><b>${esc(sel.title)}</b><span>${esc(sel.src)}</span></div>
       <p class="set-why"><b>${esc(desc.role)}</b> ${esc(desc.line)}<span class="faint"> · 이 맵 상대에게 화력 ${Math.round(ev.offense)}% · 선공 ${Math.round(ev.speed * 100)}%</span></p>
-      ${setLines(sel.set, sel.set.ab)}${metrics(ev, sel.set)}
-      ${lost.length ? `<p class="note na-note">이 게임에서 못 배우거나 못 구하는 ${esc(lost.join(', '))}는 빼고 계산했어요.</p>` : ''}
+      ${setLines(sel.set, sel.set.ab, { subs: sel.subs, itemSub: sel.itemSub })}${metrics(ev, sel.set)}
+      ${swapped.length ? `<p class="note sub-note"><b>대체 추천</b> 이 게임에서 못 배우거나 못 구해서 비슷한 역할로 바꿨어요: ${esc(swapped.join(' · '))}</p>` : ''}
+      ${lost.length ? `<p class="note na-note">대신할 것도 없어서 뺀 것: ${esc(lost.join(', '))}</p>` : ''}
     </div>
     ${target}
   </div>`;

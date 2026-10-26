@@ -36,20 +36,29 @@ export function gameItemSet(data, rule) {
  * opts.game   : { data, rule } 「포켓몬 파티!」 모드일 때
  * opts.header : 포켓몬 이름 머리줄 포함 여부, opts.extra: 카드 끝에 덧붙일 HTML
  * opts.tabs   : 다른 세팅으로 바꾸는 버튼 줄 HTML, opts.desc: { role, line } 한 줄 설명 (ui/setdesc.js)
+ * opts.subs   : 게임에서 못 쓰는 기술·도구 대신 쓸 것 { moves: Map(원래 → {slug, ko, type, cat}), item: [원래, {slug, ko}] }
  */
-export function setCard(engine, setsData, mon, set, { mode, game = null, header = true, extra = '', tabs = '', desc = null } = {}) {
+export function setCard(engine, setsData, mon, set, { mode, game = null, header = true, extra = '', tabs = '', desc = null, subs = null } = {}) {
   const line = (label, vals) => (vals ? `<div class="set-line"><span>${label}</span><span class="vals">${vals}</span></div>` : '');
   const illegal = new Set(game?.data.illegal[mon.id] || []);
   const allowed = game ? gameItemSet(game.data, game.rule) : null;
   const itemName = slug => (game?.data.itemNames[slug] ? esc(game.data.itemNames[slug][0]) : itemLabel(setsData, slug));
   const na = (html, title) => `<span class="na" title="${esc(title)}">${html}</span>`;
+  const CLS = ['변화', '물리', '특수'];
+  const subMove = s => `<span class="sub-arrow">→</span><span class="is-sub"><span class="dot t-${s.type}" title="${esc(engine.typeKo(s.type))}"></span>${esc(s.ko)}<span class="cls">${CLS[s.cat]}</span><span class="sub-mark">대체</span></span>`;
 
   const moves = set.mv.map(m => `<span>${(Array.isArray(m) ? m : [m]).map(x => {
     const label = moveLabel(engine, setsData, x);
-    return illegal.has(x) ? na(label, '이 게임에서는 배울 수 없는 기술') : label;
+    if (!illegal.has(x)) return label;
+    const s = subs?.moves.get(x);
+    return na(label, '이 게임에서는 배울 수 없는 기술') + (s ? subMove(s) : '');
   }).join(' <em>/</em> ')}</span>`).join('');
   const abilities = (set.ab.length ? set.ab : mon.ab.slice(0, 1)).map(a => esc(engine.abilityKo(a))).join(' <em>/</em> ');
-  const items = set.it.map(i => (allowed && !allowed.has(i) ? na(itemName(i), '게임 상점·아이템 칸에서 구할 수 없는 도구') : itemName(i))).join(' <em>/</em> ');
+  const items = set.it.map(i => {
+    if (!allowed || allowed.has(i)) return itemName(i);
+    const s = subs?.item?.[0] === i ? subs.item[1] : null;
+    return na(itemName(i), '게임 상점·아이템 칸에서 구할 수 없는 도구') + (s ? `<span class="sub-arrow">→</span><span class="is-sub">${esc(s.ko)}<span class="sub-mark">대체</span></span>` : '');
+  }).join(' <em>/</em> ');
   const natures = set.na.filter(Boolean).map(n => natureText(setsData, n)).join(' <em>/</em> ');
   const evs = set.ev ? ` <span class="faint">${spreadText(set.ev)}</span>` : '';
   const uses = game?.rule?.uses || [];
@@ -73,7 +82,7 @@ export function setCard(engine, setsData, mon, set, { mode, game = null, header 
     ${line('테라', tera)}
     ${line('메가진화', megaLine)}
     ${set.pool ? '<p class="note">기술 후보 중 4개를 골라 쓰는 역할별 세팅이에요.</p>' : ''}
-    ${hasNa ? '<p class="note na-note">취소선 항목은 「포켓몬 파티!」에서 구할 수 없거나 배울 수 없어요. 비슷한 도구·기술로 바꿔 쓰세요.</p>' : ''}
+    ${hasNa ? `<p class="note na-note">취소선 항목은 「포켓몬 파티!」에서 구할 수 없거나 배울 수 없어요. ${subs ? '옆의 <b>대체</b>는 같은 역할로 이 게임에서 쓸 수 있는 기술·도구예요.' : '비슷한 도구·기술로 바꿔 쓰세요.'}</p>` : ''}
     ${isChampions(mode) && set.ev ? '<p class="note">노력치는 SV 기준이에요 (챔피언스는 능력 포인트 체계).</p>' : ''}
     ${extra}
   </div>`;

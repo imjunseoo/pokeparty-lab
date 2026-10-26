@@ -9,6 +9,21 @@ const STATUS = new Set(['will-o-wisp', 'thunder-wave', 'toxic', 'spore', 'sleep-
 const SCREENS = new Set(['reflect', 'light-screen', 'aurora-veil']);
 const DOUBLES = new Set(['fake-out', 'follow-me', 'rage-powder', 'helping-hand', 'tailwind', 'trick-room', 'wide-guard', 'icy-wind', 'electroweb', 'snarl']);
 const PROTECT = new Set(['protect', 'detect', 'kings-shield', 'spiky-shield', 'baneful-bunker', 'silk-trap', 'burning-bulwark']);
+/** 변화기·특수 공격기의 역할 묶음 (대체 기술 찾기용): 같은 묶음끼리는 서로 바꿔 쓸 수 있음 */
+export function moveGroup(slug) {
+  if (SETUP_PHYS.has(slug)) return 'setup-phys';
+  if (SETUP_SPEC.has(slug)) return 'setup-spec';
+  if (SETUP_BOTH.has(slug)) return 'setup-both';
+  if (RECOVERY.has(slug)) return 'heal';
+  if (HAZARDS.has(slug)) return 'hazard';
+  if (PIVOTS.has(slug)) return 'pivot';
+  if (STATUS.has(slug)) return 'status';
+  if (SCREENS.has(slug)) return 'screen';
+  if (PROTECT.has(slug)) return 'protect';
+  if (DOUBLES.has(slug)) return 'doubles';
+  return null;
+}
+
 // 랭크업 기술이 올리는 능력
 const SETUP_STAT = {
   'swords-dance': '공격', 'dragon-dance': '공격·스피드', 'bulk-up': '공격·방어', coil: '공격·방어', curse: '공격·방어',

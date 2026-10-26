@@ -1,5 +1,6 @@
 // 상성 탐색: 포켓몬 → 약점/내성, 내 파티 대면, 실전·추천 세팅, 카운터, 자속 공격 상성
-import { store, getContext, partyMembers, addRecent, addToParty, usageInfo, isGameMode, gameRule, whereToFind, setsOrder, gameOpts } from '../state.js';
+import { store, getContext, partyMembers, addRecent, addToParty, usageInfo, isGameMode, gameRule, whereToFind, setsOrder, gameOpts, loadMoves } from '../state.js';
+import { substitutesFor } from '../ui/builder.js';
 import { createPicker } from '../ui/picker.js';
 import { esc, on, toast, copyText, josa } from '../ui/dom.js';
 import { sprite, typeBadge, typeList, mult, statBars, dexNo, barList, moveLabel, itemLabel, natureText, spreadText, ICONS } from '../ui/components.js';
@@ -258,16 +259,18 @@ function recommendedSection(mon) {
   const { engine, sets } = store;
   const info = usageInfo();
   const sub = isGameMode()
-    ? `${gameRule().name} 기준 · 게임에서 못 구하는 도구·기술은 취소선`
+    ? `${gameRule().name} 기준 · 게임에서 못 구하는 도구·기술은 취소선, 옆에 대신 쓸 기술·도구`
     : info ? `${info.label} 실전 통계 상위 ${info.count}위 안에 없어 추천 세팅을 보여드려요`
     : 'Smogon 분석가 세팅 · 랜덤배틀 역할 세팅 · 자체 생성';
   const head = `<div class="card-head"><h3>추천 세팅</h3><span class="sub">${esc(sub)}</span></div>`;
   if (!sets) return `<section class="card">${head}<p class="note">추천 세팅 불러오는 중…</p></section>`;
   const list = orderedSets(sets, mon.id, setsOrder());
   if (!list.length) return `<section class="card">${head}<p class="note">세팅 정보가 없어요.</p></section>`;
+  // 게임 모드: 못 배우는 기술·못 구하는 도구 대신 쓸 것 (기술 데이터를 받으면 다시 그림)
+  if (isGameMode() && !store.moves) loadMoves();
   const opts = { mode: store.mode, game: gameOpts(), header: false };
   return `<section class="card">${head}
-    <div class="sets">${list.map(s => setCard(engine, sets, mon, s, opts)).join('')}</div></section>`;
+    <div class="sets">${list.map(s => setCard(engine, sets, mon, s, { ...opts, subs: isGameMode() ? substitutesFor(mon, s) : null })).join('')}</div></section>`;
 }
 
 function usageCard(mon, u) {
