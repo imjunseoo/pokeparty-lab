@@ -179,15 +179,51 @@ function build({ dat, dex, sets, T }) {
     }
     return slug;
   };
-  const items = {
-    battle: syms(block(itemSrc, 'BATTLE_ITEMS')).map(item),
-    berry: syms(block(itemSrc, 'BERRY_ITEMS')).map(item),
-    signature: syms(block(shopSrc, 'SIGNATURE_ITEMS')).map(item),
-    mega: syms(block(shopSrc, 'MEGA_STONES')).map(item),
-    z: syms(block(shopSrc, 'Z_CRYSTALS')).map(item),
-    dynamax: syms(block(shopSrc, 'DYNAMAX_ITEMS')).map(item),
-    tera: syms(block(shopSrc, 'TERA_ITEMS')).map(item),
+  // ── 포켓몬에게 지닐 수 있는 도구만 (게임 items.dat 의 can_hold? 규칙 + 보드 스크립트 예외) ──
+  //   중요한 물건(주머니 8 · KeyItem: 로토무카탈로그·그라시데아꽃 등)·기술머신(주머니 4)은 못 지님.
+  //   Z크리스탈은 "중요한 물건"이지만 게임이 사용하면 쥐여 주는 방식이라 지님,
+  //   마스터테라주얼·다이스프는 지니는 게 아니라 포켓몬에게 쓰는 도구 (Bag_Scene USE_ON_POKEMON_ITEMS)
+  const useOnly = new Set(syms(block(script('Bag_Scene'), 'USE_ON_POKEMON_ITEMS')));
+  const itemBySym = new Map([...gameItems].map(([k, v]) => [String(k), v]));
+  const holdable = sym => {
+    const it = itemBySym.get(sym);
+    if (!it || useOnly.has(sym)) return false;
+    const flags = (it.flags || []).map(String);
+    if (flags.includes('ZCrystal')) return true;
+    return it.pocket !== 8 && it.pocket !== 4 && !flags.includes('KeyItem');
   };
+  const held = list => list.filter(holdable);
+  const rawItems = {
+    battle: syms(block(itemSrc, 'BATTLE_ITEMS')),
+    berry: syms(block(itemSrc, 'BERRY_ITEMS')),
+    signature: syms(block(shopSrc, 'SIGNATURE_ITEMS')),
+    mega: syms(block(shopSrc, 'MEGA_STONES')),
+    z: syms(block(shopSrc, 'Z_CRYSTALS')),
+    dynamax: syms(block(shopSrc, 'DYNAMAX_ITEMS')),
+    tera: syms(block(shopSrc, 'TERA_ITEMS')),
+  };
+  const items = Object.fromEntries(Object.entries(rawItems).map(([k, list]) => [k, held(list).map(item)]));
+  const notHeld = Object.values(rawItems).flat().filter(s => !holdable(s));
+
+  // ── 도구를 얻는 곳·상점 가격 (지닐 수 있는 도구만) + 같은 이름의 파티 아이템 ──
+  //   배틀 아이템: 아이템 칸의 "배틀 아이템"·상점 일반 상품 (가격은 실전 강도 4단계), 나무열매: 같은 곳 (3단계),
+  //   전용도구: 상점의 전용도구 칸 (균일가), 메가스톤·Z크리스탈·다이버섯·테라피스: 기믹 상점 (그 룰일 때만)
+  const priceOf = name => +(shopSrc.match(new RegExp(`\\b${name}\\s*=\\s*(\\d+)`))?.[1] || 0);
+  const tierOf = (sym, tiers, fallback) => tiers.find(([list]) => list.includes(sym))?.[1] ?? fallback;
+  const battleTiers = [[syms(block(shopSrc, 'BATTLE_ITEMS_TOP')), priceOf('BATTLE_ITEM_PRICE_TOP')],
+    [syms(block(shopSrc, 'BATTLE_ITEMS_HIGH')), priceOf('BATTLE_ITEM_PRICE_HIGH')], [syms(block(shopSrc, 'BATTLE_ITEMS_LOW')), priceOf('BATTLE_ITEM_PRICE_LOW')]];
+  const berryTiers = [[syms(block(shopSrc, 'BERRY_ITEMS_HIGH')), priceOf('BERRY_PRICE_HIGH')], [syms(block(shopSrc, 'BERRY_ITEMS_LOW')), priceOf('BERRY_PRICE_LOW')]];
+  const partyItems = [...block(itemSrc, 'PARTY_ITEMS').matchAll(/\{\s*key:\s*:(\w+),\s*icon:\s*:(\w+),\s*name:\s*"([^"]+)"[\s\S]*?desc:\s*"([^"]+)"/g)]
+    .map(([, key, icon, name, desc]) => ({ key, icon, name, desc }));
+  const itemInfo = {};
+  for (const [cat, list] of Object.entries(rawItems)) for (const sym of held(list)) {
+    const slug = item(sym);
+    const price = cat === 'battle' ? tierOf(sym, battleTiers, priceOf('BATTLE_ITEM_PRICE_MID'))
+      : cat === 'berry' ? tierOf(sym, berryTiers, priceOf('BERRY_PRICE_MID'))
+        : cat === 'signature' ? priceOf('SIGNATURE_ITEM_PRICE') : priceOf('GIMMICK_ITEM_PRICE');
+    const party = partyItems.find(p => p.icon === sym);
+    itemInfo[slug] = [cat, price, ...(party ? [party.name, party.desc] : [])];
+  }
   // 토너먼트 직전 상점: 파티 아이템 키 → 게임 표시 이름
   const tourneyShop = [...block(shopSrc, 'TOURNEY_SHOP_ITEMS').matchAll(/:(\w+)/g)].map(([, key]) => ({
     key, name: itemSrc.match(new RegExp(`key:\\s*:${key}\\b[^}]*?name:\\s*"([^"]+)"`))?.[1] || key,
@@ -315,6 +351,7 @@ function build({ dat, dex, sets, T }) {
     areas,
     pool,
     items,
+    itemInfo,
     itemNames,
     megas,
     evo,
@@ -361,7 +398,7 @@ function build({ dat, dex, sets, T }) {
     const legends = Object.values(pool).filter(x => x.l).length;
     console.log(`✔ game/pokemon-party.json · v${version} · ${size}`);
     console.log(`  지역 ${areas.length}곳 (${areas.reduce((a, x) => a + x.mons.length, 0)}종) · 전체 풀 ${Object.keys(pool).length}종 (전설류 ${legends}) · 맵 ${maps.map(m => m.name).join('/')}`);
-    console.log(`  룰 ${rules.map(r => r.name).join('/')} · 배틀도구 ${items.battle.length} · 열매 ${items.berry.length} · 메가스톤 ${items.mega.length}`);
+    console.log(`  룰 ${rules.map(r => r.name).join("/")} · 배틀도구 ${items.battle.length} · 열매 ${items.berry.length} · 메가스톤 ${items.mega.length} · 못 지니는 도구 제외 ${notHeld.join(", ")}`);
     console.log(`  게임에서 못 배우는 세팅 기술이 있는 포켓몬 ${Object.keys(illegal).length} · 원작과 다른 타입/종족값 ${Object.keys(changed).length}`);
     if (unmapped.length) console.log('  ℹ 도감에 매핑 못 한 게임 종족:', [...new Set(unmapped)].slice(0, 40).join(', '));
   });

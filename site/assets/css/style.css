@@ -413,7 +413,7 @@ button.type { border: 0; cursor: pointer; }
 .cov-item.miss { outline: 1px dashed var(--danger); background: var(--danger-soft); }
 
 .sets { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
-.set-card { border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: grid; gap: 8px; background: var(--surface-2); }
+.set-card { border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: grid; gap: 8px; align-content: start; background: var(--surface-2); }
 .set-card header { display: flex; align-items: center; gap: 8px; font-weight: 800; }
 .set-card header img { width: 40px; height: 40px; }
 .set-src { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 12px; color: var(--faint); margin-top: -2px; }
@@ -449,6 +449,9 @@ button.type { border: 0; cursor: pointer; }
 .sub-row { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; text-align: left; border: 0; background: transparent; padding: 3px 0; font: inherit; font-size: 12.5px; color: var(--text); cursor: pointer; }
 .sub-row:hover .sub-src { text-decoration: underline; }
 .sub-src { font-weight: 800; color: var(--info); }
+/* 같은 이름의 파티 아이템이 있는 도구 주의 */
+.item-warn { margin-left: 4px; padding: 0 5px; border-radius: 5px; font-size: 10.5px; font-weight: 800; background: var(--warn-soft); color: var(--warn); cursor: help; }
+.item-warn-note { margin: 0; color: var(--warn); font-size: 12px; }
 
 /* 검색해서 고르는 입력칸 (내 세팅 입력) */
 .ss { position: relative; min-width: 0; }

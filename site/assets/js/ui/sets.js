@@ -1,6 +1,6 @@
 // 추천 세팅 표시 (실전 통계에 없는 포켓몬용): Smogon 분석가 세팅 → 랜덤배틀 역할 세팅 → 자체 생성
 // 「포켓몬 파티!」 모드에서는 게임에서 못 구하는 도구 · 못 배우는 기술을 표시하고 기믹 룰에 맞춰 보여준다.
-import { esc } from './dom.js';
+import { esc, josa } from './dom.js';
 import { sprite, typeBadge, moveLabel, itemLabel, natureText, spreadText } from './components.js';
 
 // 세팅 우선순위 (B 배틀스타디움 싱글 · S Smogon 싱글 · D 더블 · R 랜덤배틀 · A 자체 생성)
@@ -31,6 +31,17 @@ export function gameItemSet(data, rule) {
 }
 
 /**
+ * 같은 이름의 파티 아이템이 따로 있는 도구 (돌격조끼·자석·레드카드…) 안내 문장. info: gameData.itemInfo[slug]
+ * 파티 아이템 쪽은 보드 효과만 있고 지닐 수 없다.
+ */
+export function partyTwinNote(info) {
+  if (!info?.[2]) return null;
+  const kind = info[0] === 'battle' ? '배틀 아이템' : '전용도구';
+  const effect = info[3].split('.')[0].trim();
+  return `아이템 칸·상점에서 「${kind}」${josa(kind, '으로').slice(kind.length)} 나온 ${info[2]}만 지닐 수 있어요. 「파티 아이템」으로 나온 ${josa(info[2], '은는')} 보드 효과(${effect})만 있고 지닐 수 없어요.`;
+}
+
+/**
  * 세팅 한 개 카드.
  * opts.mode   : 데이터 기준 (챔피언스면 테라 숨김·노력치 안내)
  * opts.game   : { data, rule } 「포켓몬 파티!」 모드일 때
@@ -54,8 +65,13 @@ export function setCard(engine, setsData, mon, set, { mode, game = null, header 
     return na(label, '이 게임에서는 배울 수 없는 기술') + (s ? subMove(s) : '');
   }).join(' <em>/</em> ')}</span>`).join('');
   const abilities = (set.ab.length ? set.ab : mon.ab.slice(0, 1)).map(a => esc(engine.abilityKo(a))).join(' <em>/</em> ');
+  // 같은 이름의 파티 아이템이 따로 있는 도구(돌격조끼 등): 배틀 아이템으로 나온 것만 지닐 수 있음
+  const partyTwin = i => {
+    const note = partyTwinNote(game?.data.itemInfo?.[i]);
+    return note ? `<span class="item-warn" title="${esc(note)}">⚠</span>` : '';
+  };
   const items = set.it.map(i => {
-    if (!allowed || allowed.has(i)) return itemName(i);
+    if (!allowed || allowed.has(i)) return itemName(i) + partyTwin(i);
     const s = subs?.item?.[0] === i ? subs.item[1] : null;
     return na(itemName(i), '게임 상점·아이템 칸에서 구할 수 없는 도구') + (s ? `<span class="sub-arrow">→</span><span class="is-sub">${esc(s.ko)}<span class="sub-mark">대체</span></span>` : '');
   }).join(' <em>/</em> ');

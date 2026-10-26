@@ -4,7 +4,7 @@ import { esc, josa } from './dom.js';
 import { sprite } from './components.js';
 import { NATURES, TYPE_ITEMS, MODELED_ITEMS } from '../core/build.js';
 import { STAT_LABELS } from '../core/engine.js';
-import { itemName } from './reasons.js';
+import { itemName, itemSource, itemPartyWarning } from './reasons.js';
 import { orderedSets } from './sets.js';
 import { describeSet, refSource, setNameKo, moveGroup } from './setdesc.js';
 import { searchSelect, defineOptions, setSearchValue } from './searchselect.js';
@@ -77,8 +77,13 @@ function setLines(set, ab, { rows = null, itemSub = null } = {}) {
   const item = itemSub && itemSub[1] === set.it
     ? `<span class="sub-pair">${struck(itemName(itemSub[0]), '이 게임에서 못 구하는 도구')}<span class="sub-arrow">→</span><span class="is-sub">${esc(itemName(set.it))}<span class="sub-mark">대체</span></span></span>`
     : set.it ? esc(itemName(set.it)) : '<span class="faint">없음</span>';
+  // 얻는 곳·가격, 같은 이름의 파티 아이템이 있으면 주의
+  const src = set.it ? itemSource(set.it) : null;
+  const warn = set.it ? itemPartyWarning(set.it) : null;
+  const itemExtra = (src ? `<em>${esc(src.text)}</em>` : '') + (warn ? `<span class="item-warn" title="${esc(warn)}">⚠ 같은 이름 파티 아이템 주의</span>` : '');
   return line('기술', moves)
-    + line('도구', item)
+    + line('도구', item + itemExtra)
+    + (warn ? `<p class="note item-warn-note">${esc(warn)}</p>` : '')
     + line('특성', ab ? esc(store.engine.abilityKo(ab)) : '')
     + line('성격', natureLabel(set.na))
     + line('개체값', ivText(set.iv || NO_IV));
@@ -312,7 +317,10 @@ function editorHtml(i, m, pm) {
     ...(uses.includes('mega') ? [['메가스톤', it.mega]] : []), ...(uses.includes('z') ? [['Z크리스탈', it.z]] : [])];
   const itemList = `it:${gameRule()?.key}`;
   defineOptions(itemList, [{ value: '', label: '없음', sub: '도구 없음' },
-    ...itemGroups.flatMap(([group, list]) => list.filter(x => allowed.has(x)).map(x => ({ value: x, label: itemName(x), sub: group, keys: `${group} ${x}` })))]);
+    ...itemGroups.flatMap(([group, list]) => list.filter(x => allowed.has(x)).map(x => ({
+      value: x, label: itemName(x), keys: `${group} ${x}`,
+      sub: `${group} · ${(itemSource(x)?.price || 0).toLocaleString()}원${itemPartyWarning(x) ? ' · ⚠ 같은 이름 파티 아이템 있음' : ''}`,
+    })))]);
   const itemSelect = pm.stone
     ? `<label>도구<select class="select" name="it" disabled><option value="${pm.stone}">${esc(itemName(pm.stone))} (메가진화)</option></select></label>`
     : `<label>도구${searchSelect({ name: 'it', list: itemList, value: set.it || '', placeholder: '도구 이름·초성', label: '도구' })}</label>`;

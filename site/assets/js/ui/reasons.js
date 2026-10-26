@@ -2,6 +2,7 @@
 import { store, whereToFind } from '../state.js';
 import { esc, josa } from './dom.js';
 import { typeBadge } from './components.js';
+import { partyTwinNote } from './sets.js';
 
 /** 추천 후보 → 파티에 넣을 모습: 진화 전으로만 잡히면 그 모습 + 진화 목표, 메가진화 후보면 메가 폼 */
 export function addPlan(c) {
@@ -18,6 +19,19 @@ export function catchHint(c) {
 
 /** 게임 도구 한글명 (게임 데이터에 없으면 slug) */
 export const itemName = slug => store.gameData?.itemNames[slug]?.[0] || slug;
+
+// 지니는 도구를 얻는 곳 (게임 스크립트: 아이템 칸·상점)
+const ITEM_SOURCE = {
+  battle: '배틀 아이템 · 아이템 칸·상점 일반 상품(무작위)', berry: '나무열매 · 아이템 칸·상점 일반 상품(무작위)',
+  signature: '전용도구 · 상점 전용도구 칸', mega: '메가스톤 · 기믹 상점', z: 'Z크리스탈 · 기믹 상점', dynamax: '기믹 상점', tera: '기믹 상점',
+};
+/** 도구를 얻는 곳·상점 가격 { src, price, text } (게임 지니는 도구가 아니면 null) */
+export function itemSource(slug) {
+  const info = store.gameData?.itemInfo?.[slug];
+  return info ? { src: info[0], price: info[1], text: `${ITEM_SOURCE[info[0]] || '상점'} · ${info[1].toLocaleString()}원` } : null;
+}
+/** 같은 이름의 파티 아이템이 따로 있는 도구 (돌격조끼·자석·레드카드…) 안내 문장 | null */
+export const itemPartyWarning = slug => partyTwinNote(store.gameData?.itemInfo?.[slug]);
 
 export function reasonChip(engine, r) {
   switch (r.kind) {
