@@ -305,7 +305,8 @@ export const explainCandidate = (ctx, members, c) => explain(ctx, stateOf(ctx, m
 
 /**
  * 야생 칸 후보를 잡아 파티에 넣었을 때의 점수 상승폭. 파티가 6마리면 가장 덜 아까운 멤버와 바꾼 경우로 잰다.
- * @returns { gain, replace: 바꿀 멤버 번호 | null, blocked: 같은 종이 이미 있거나 메가진화가 이미 있음, reasons }
+ * @returns { gain, replace: 바꿀 멤버 번호 | null, blocked: 같은 종이 이미 있거나 메가진화가 이미 있음, reasons,
+ *            swaps: [{ i, gain }] (파티가 6마리일 때 멤버마다 바꾼 경우, gain 큰 순) }
  */
 export function catchValue(ctx, members, c, { prepared = prepareCatch(ctx, members), reasons = true } = {}) {
   const { st, base, rests } = prepared;
@@ -315,13 +316,33 @@ export function catchValue(ctx, members, c, { prepared = prepareCatch(ctx, membe
     return { gain: scoreWith(ctx, st, c) - base, replace: null, blocked: false, reasons: reasons ? explain(ctx, st, c) : [] };
   }
   let best = null;
+  const swaps = [];
   rests.forEach((rest, i) => {
     if (!allowed(rest, c)) return;
     const gain = scoreWith(ctx, rest, c) - base;
+    swaps.push({ i, gain });
     if (!best || gain > best.gain) best = { gain, replace: i, rest };
   });
-  if (!best) return { gain: -Infinity, replace: null, blocked: true, reasons: [] };
-  return { gain: best.gain, replace: best.replace, blocked: false, reasons: reasons ? explain(ctx, best.rest, c) : [] };
+  if (!best) return { gain: -Infinity, replace: null, blocked: true, reasons: [], swaps: [] };
+  swaps.sort((a, b) => b.gain - a.gain);
+  return { gain: best.gain, replace: best.replace, blocked: false, reasons: reasons ? explain(ctx, best.rest, c) : [], swaps };
+}
+
+// 꽉 찬 파티에서 바꿀지: 이만큼 오르면 바꾸기 · 조금 나음, 세팅을 키워 둔 멤버는 다시 맞추는 수고만큼 더 올라야 함
+export const SWAP_MIN = 0.1, SWAP_GOOD = 0.4, TRAINED_COST = 0.3;
+
+/**
+ * 꽉 찬 파티에서 후보를 잡았을 때 어떻게 할지 (catchValue 의 swaps)
+ * trained: 세팅을 키워 둔(내 세팅을 입력한) 멤버 번호 Set → 바꾸면 기술·도구·성격을 다시 맞춰야 해서 TRAINED_COST 만큼 빼고 비교
+ * @returns { kind: 'swap' 바꾸기 · 'maybe' 바꾸면 조금 나음 · 'keep' 바꾸지 말기(잡으면 박스로), pick: { i, gain, net } | null,
+ *            list: [{ i, gain, net, trained }] (net 큰 순) }
+ */
+export function swapDecision(swaps, trained = new Set()) {
+  const list = (swaps || []).map(x => ({ ...x, trained: trained.has(x.i), net: x.gain - (trained.has(x.i) ? TRAINED_COST : 0) }))
+    .sort((a, b) => b.net - a.net);
+  const pick = list[0];
+  if (!pick || pick.net < SWAP_MIN) return { kind: 'keep', pick: null, list };
+  return { kind: pick.net >= SWAP_GOOD ? 'swap' : 'maybe', pick, list };
 }
 
 /**
