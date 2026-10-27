@@ -3,7 +3,7 @@
 // 예시를 고르면 바로 다음 추천을 다시 계산한다.
 import {
   store, update, getContext, partyMembers, addToParty, encodeParty, usageInfo,
-  isGameMode, gameRule, battleMode, whereToFind, setsOrder, gameOpts, evoOptions, megaOptions, battleForm, loadMoves, sanitizeSet, toggleRelearn, relearnToast, setItemMode,
+  isGameMode, gameRule, battleMode, whereToFind, setsOrder, gameOpts, evoOptions, megaOptions, battleForm, formOptions, formKey, loadMoves, sanitizeSet, toggleRelearn, relearnToast, setItemMode,
 } from '../state.js';
 import { createPicker } from '../ui/picker.js';
 import { esc, on, toast, copyText, josa } from '../ui/dom.js';
@@ -262,10 +262,11 @@ function renderSlots(ctx, members) {
     const finals = evoOptions(caught);
     const evolved = (finals.find(f => f.mon.id === m.evo) || finals[0])?.mon || caught;
     const megas = megaOptions(evolved);
+    const forms = formOptions(evolved);
     const abilities = engine.abilitiesOf(mon);
     const reasons = m.picked ? explainSlot(ctx, members, i).filter(r => r.kind !== 'usage') : [];
     const where = isGameMode() ? whereToFind(caught) : '';
-    const evoNote = mon.id !== caught.id
+    const evoNote = mon.id !== caught.id || mon.form
       ? `<div class="slot-evo">→ <b>${esc(mon.ko)}</b> 기준으로 분석${pm.stone ? ` · ${esc(itemName(pm.stone))}` : ''}${pm.autoMega ? ' <span class="pill-soft accent" title="평균 승률이 가장 많이 오르는 메가진화 (메가진화 칸에서 바꿀 수 있어요)">자동 추천</span>' : ''}</div>` : '';
     html.push(`
       <div class="slot ${m.picked ? 'picked' : ''}">
@@ -280,9 +281,13 @@ function renderSlots(ctx, members) {
             <button type="button" data-remove="${i}" title="빼기" aria-label="파티에서 빼기">${ICONS.close}</button>
           </div>
         </div>
-        <div class="slot-fields ${showTera || finals.length > 1 || megas.length ? '' : 'one'}">
+        <div class="slot-fields ${showTera || finals.length > 1 || megas.length || forms.length ? '' : 'one'}">
           ${finals.length > 1 ? `<label>진화 목표<select class="select" data-field="evo" data-i="${i}">
             ${finals.map(f => `<option value="${f.mon.id}" ${f.mon.id === evolved.id ? 'selected' : ''}>${esc(f.mon.ko)}${f.item ? ` (${esc(itemName(f.item))})` : ''}</option>`).join('')}
+          </select></label>` : ''}
+          ${forms.length ? `<label>폼<select class="select" data-field="form" data-i="${i}" title="상점 전용도구 칸의 폼 변경 도구 (폼 추천 탭에서 비교)">
+            <option value="">기본</option>
+            ${forms.map(o => `<option value="${formKey(o)}" ${formKey(o) === m.form ? 'selected' : ''}>${esc(o.name)} · ${esc(itemName(o.item))}</option>`).join('')}
           </select></label>` : ''}
           ${megas.length ? `<label>메가진화<select class="select" data-field="mega" data-i="${i}">
             <option value="" ${m.mega == null ? 'selected' : ''}>자동 추천${m.mega == null ? (pm.autoMega ? ` (${esc(mon.ko)})` : ' (안 함)') : ''}</option>

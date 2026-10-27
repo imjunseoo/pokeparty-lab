@@ -2,7 +2,7 @@
 import { createEngine } from './core/engine.js';
 import { createSearch } from './core/search.js';
 import { createContext, finalsOf } from './core/party.js';
-import { createMoveBook, createBuilder, NATURES, CHOICE, ITEM_MODES } from './core/build.js';
+import { createMoveBook, createBuilder, NATURES, CHOICE, ITEM_MODES, DRIVE_TYPE } from './core/build.js';
 import { josa, storage } from './ui/dom.js';
 
 export const TYPE_MODE = 'type';
@@ -22,7 +22,7 @@ export const store = {
   // relearn: 기술 떠올리기(기술 칸·학습장치의 교배·가르침·기술머신 기술)까지 추천·대체에 쓸지
   // items: 추천 세팅에 쓸 도구 'all' 전부 · 'nochoice' 구애 도구 빼기 · 'none' 도구 없이
   game: { map: 'tour', rule: 'normal', battle: 'single', legends: false, relearn: true, items: 'all' },
-  party: [],        // [{ id, ability, tera, picked, evo(진화 목표 id), mega(메가진화 폼 id · 0 안 함 · null 자동 추천), set(내 세팅) }]
+  party: [],        // [{ id, ability, tera, picked, evo(진화 목표 id), mega(메가진화 폼 id · 0 안 함 · null 자동 추천), form(폼 변경 도구 폼), set(내 세팅) }]
   opponents: [],    // 선봉 추천용 상대 파티 [id]
   wild: [],         // 포획 추천: 야생 칸에서 나온 후보 [id] (최대 3)
   ball: 'poke',     // 포획 추천: 지금 쓰는 볼 (라운드에 따라 바뀜)
@@ -230,8 +230,18 @@ export const evoOptions = mon => finalsOf(store.engine, store.gameData, mon)
 /** 지금 게임 룰에서 쓸 수 있는 메가진화 [[메가 폼 id, 메가스톤]] (게임 모드 + 메가 룰일 때만) */
 export const megaOptions = mon => (isGameMode() && gameRule()?.uses.includes('mega') ? store.gameData.megas[mon.id] || [] : []);
 
+/** 폼 변경 도구로 바꿀 수 있는 폼 [{ id, item, hold, t, name }] (게임 모드만, 전용도구 칸) */
+export const formOptions = mon => (isGameMode() ? store.gameData.formItems?.[mon.id] || [] : []);
+/** 폼 선택 값 (도감에 따로 있는 폼은 dex id, 타입만 바뀌는 폼은 도구) */
+export const formKey = o => (o.id ? `f${o.id}` : `i:${o.item}`);
+/** 폼 → 싸우는 모습. 타입만 바뀌는 폼(아르세우스·실버디·게노세크트)은 기본 폼을 복사해 타입·이름만 바꿈 */
+export function formMon(base, o) {
+  if (o.id) return store.engine.byId.get(o.id) || base;
+  return { ...base, t: o.t || base.t, ko: `${base.ko} (${o.name})`, form: formKey(o) };
+}
+
 /**
- * 파티 멤버가 실제로 싸우는 모습: 최종 진화(evolve) → 메가진화. { mon, caught, stone, autoMega }
+ * 파티 멤버가 실제로 싸우는 모습: 최종 진화(evolve) → 폼 변경 도구(m.form) → 메가진화. { mon, caught, stone(정해진 지닌 도구), autoMega, form }
  * m.mega: 메가 폼 id = 직접 고름 · 0 = 메가진화 안 함 · null = 정하지 않음 → auto(자동 추천 { id })가 있으면 그것
  */
 export function battleForm(m, { evolve = true, auto = null } = {}) {
@@ -241,6 +251,9 @@ export function battleForm(m, { evolve = true, auto = null } = {}) {
     const finals = evoOptions(caught);
     mon = (finals.find(f => f.mon.id === m.evo) || finals[0])?.mon || caught;
   }
+  // 폼 변경 도구: 지니면 바뀌는 폼은 그 도구가 정해진 지닌 도구 (메가진화와 함께 못 씀)
+  const fo = m.form ? formOptions(mon).find(o => formKey(o) === m.form) : null;
+  if (fo) return { mon: formMon(mon, fo), caught, stone: fo.hold ? fo.item : null, autoMega: false, form: fo };
   const want = m.mega > 0 ? m.mega : m.mega === 0 ? null : auto?.id ?? null;
   const mega = megaOptions(mon).find(([id]) => id === want);
   return mega ? { mon: store.engine.byId.get(mega[0]), caught, stone: mega[1], autoMega: !(m.mega > 0) } : { mon, caught, stone: null, autoMega: false };
@@ -281,7 +294,10 @@ export function partyMembers(ctx = getContext(), { evolve = true, auto = true } 
   return store.party.map((m, i) => {
     const { mon, caught, stone, autoMega } = battleForm(m, { evolve, auto: pick?.i === i ? pick : null });
     const ability = engine.abilitiesOf(mon).includes(m.ability) ? m.ability : undefined;
-    const pm = ctx.prep(mon, { ability, tera: m.tera || null, base: caught, stone, atk: attackTypes(m.set) });
+    // 게노세크트 카세트: 테크노버스터 타입을 공격 범위에 더함
+    const drive = DRIVE_TYPE[stone];
+    const atk = drive ? [...new Set([...(attackTypes(m.set) || mon.t), drive])] : attackTypes(m.set);
+    const pm = ctx.prep(mon, { ability, tera: m.tera || null, base: caught, stone, atk });
     return autoMega ? { ...pm, autoMega } : pm;
   });
 }
@@ -313,6 +329,7 @@ function sanitizeParty(list) {
     const evo = finals.some(f => f.mon.id === +m.evo) ? +m.evo : null;
     const formIds = new Set([mon.id, ...finals.map(f => f.mon.id)]);
     const megas = [...formIds].flatMap(id => store.gameData?.megas[id] || []);
+    const forms = [...formIds].flatMap(id => store.gameData?.formItems?.[id] || []);
     out.push({
       id: mon.id,
       ability: m.ability && [...formIds].some(id => engine.abilitiesOf(engine.byId.get(id)).includes(m.ability)) ? m.ability : null,
@@ -320,6 +337,7 @@ function sanitizeParty(list) {
       picked: !!m.picked,
       evo,
       mega: m.mega === 0 ? 0 : megas.some(([id]) => id === +m.mega) ? +m.mega : null,   // 0 = 메가진화 안 함
+      form: forms.some(o => formKey(o) === m.form) ? m.form : null,                    // 폼 변경 도구로 바꾼 폼
       set: sanitizeSet(m.set),
     });
   }

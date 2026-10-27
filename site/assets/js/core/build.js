@@ -46,6 +46,13 @@ export const ITEM_MODES = [
   { key: 'nochoice', label: '구애 빼기', name: '구애 도구 빼기', desc: '구애머리띠·구애안경·구애스카프를 빼고' },
   { key: 'none', label: '없이', name: '도구 없이', desc: '도구를 못 구했을 때 기준으로' },
 ];
+// 지닌 도구로 타입이 정해지는 전용기: 심판의뭉치(플레이트) · 멀티어택(메모리) · 테크노버스터(카세트)
+export const DRIVE_TYPE = { 'douse-drive': 'water', 'shock-drive': 'electric', 'burn-drive': 'fire', 'chill-drive': 'ice' };
+const ITEM_MOVE_TYPE = {
+  judgment: it => (it?.endsWith('-plate') ? TYPE_ITEMS[it] : null),
+  'multi-attack': it => it?.match(/^(\w+)-memory$/)?.[1] || null,
+  'techno-blast': it => DRIVE_TYPE[it] || null,
+};
 // -ate 특성: 노말 기술 → 그 타입 ×1.2
 const ATE = { aerilate: 'flying', pixilate: 'fairy', refrigerate: 'ice', galvanize: 'electric' };
 const ABILITY_TYPE = { transistor: ['electric', 1.3], 'dragons-maw': ['dragon', 1.5], steelworker: ['steel', 1.5], 'rocky-payload': ['rock', 1.5], 'water-bubble': ['water', 2] };
@@ -163,7 +170,7 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
   function moveCalc(p, mv, { single = false } = {}) {
     if (!mv || mv.cat === 0 || (!mv.power && !mv.fx)) return null;
     const { ab, it, st, lv } = p;
-    let type = mv.type, pm = 1;
+    let type = ITEM_MOVE_TYPE[mv.slug]?.(it) || mv.type, pm = 1;
     if (type === 'normal' && ATE[ab]) { type = ATE[ab]; pm *= 1.2; }
     if (ABILITY_TYPE[ab]?.[0] === type) pm *= ABILITY_TYPE[ab][1];
     if (ab === 'technician' && mv.power <= 60) pm *= 1.5;
@@ -326,8 +333,9 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
   }
 
   /** 습득표가 있는 폼 id (메가진화 폼은 기본 폼) */
+  // 습득표가 없는 폼(메가진화 · 원시회귀 등)은 같은 종의 기본 폼 습득표
   function learnId(mon) {
-    if (book.learn(mon.id).length || !mon.mega) return mon.id;
+    if (book.learn(mon.id).length) return mon.id;
     return engine.dex.pokemon.find(p => p.sp === mon.sp && !p.mega && book.learn(p.id).length)?.id ?? mon.id;
   }
   /** 기술 떠올리기로만 배우는 기술 slug Set */

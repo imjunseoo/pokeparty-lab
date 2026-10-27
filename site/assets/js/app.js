@@ -1,4 +1,4 @@
-// 진입점: 데이터 로드 → 화면 초기화 → 해시 라우팅 (#/matchup/<slug>, #/party/<파티>, #/strategy, #/battle/<상대 slug>, #/lead/<상대>, #/chart)
+// 진입점: 데이터 로드 → 화면 초기화 → 해시 라우팅 (#/matchup/<slug>, #/party/<파티>, #/strategy, #/battle/<상대 slug>, #/forms, #/lead/<상대>, #/chart)
 import {
   store, initStore, subscribe, setMode, loadUsage, loadSets, decodeParty, decodeIds, encodeParty, update, usageInfo,
   isGameMode, TYPE_MODE, GAME_MODE,
@@ -10,11 +10,12 @@ import { initCatch, renderCatch } from './views/catch.js';
 import { initStarter, renderStarter } from './views/starter.js';
 import { initStrategy, renderStrategy } from './views/strategy.js';
 import { initBattle, renderBattle, showBattle } from './views/battle.js';
+import { initForms, renderForms } from './views/forms.js';
 import { initChart } from './views/chart.js';
 import { $, esc, toast } from './ui/dom.js';
 
-const TABS = ['matchup', 'party', 'strategy', 'battle', 'catch', 'starter', 'lead', 'chart'];
-const TITLES = { party: '파티 추천', strategy: '칸별 전략', battle: '전투 전략', catch: '포획 추천', starter: '스타팅 추천', lead: '선봉 추천', chart: '타입 상성표' };
+const TABS = ['matchup', 'party', 'strategy', 'battle', 'forms', 'catch', 'starter', 'lead', 'chart'];
+const TITLES = { party: '파티 추천', strategy: '칸별 전략', battle: '전투 전략', forms: '폼 추천', catch: '포획 추천', starter: '스타팅 추천', lead: '선봉 추천', chart: '타입 상성표' };
 let current = null;
 
 async function fetchJson(url) {
@@ -41,6 +42,7 @@ async function boot() {
     initStarter($('#view-starter'));
     initStrategy($('#view-strategy'));
     initBattle($('#view-battle'));
+    initForms($('#view-forms'));
     initChart($('#view-chart'));
     setupModeSelect();
     setupTheme();
@@ -53,6 +55,7 @@ async function boot() {
       if (current === 'starter') renderStarter();
       if (current === 'strategy') renderStrategy();
       if (current === 'battle') renderBattle();
+      if (current === 'forms') renderForms();
       renderFooter();
     });
     window.addEventListener('hashchange', route);
@@ -96,6 +99,8 @@ function route() {
     renderStrategy();
   } else if (tab === 'battle') {
     showBattle(decodeURIComponent(arg) || null);
+  } else if (tab === 'forms') {
+    renderForms();
   }
   if (changed && tab !== 'matchup') window.scrollTo({ top: 0 });
 }

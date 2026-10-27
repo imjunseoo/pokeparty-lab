@@ -126,3 +126,33 @@ test('개체값: 최선 세팅은 31을 가정하지 않고 지금 개체값(기
   const up = builder.evaluate(m, { ...best, iv: [0, 1, 2, 3, 4, 5].map(k => iv.stats.includes(k)) }).score;
   assert.ok(up > builder.evaluate(m, best).score, '개체값을 올리면 점수가 오른다');
 });
+
+test('폼: 지방 폼 진화 갈래 · 폼 변경 도구 · 지닌 도구로 타입이 정해지는 전용기', () => {
+  const ko = id => engine.byId.get(id)?.ko;
+  // 마그케인 → 블레이범 · 히스이 블레이범(히스이의 골동품), 아라리 → 나시 · 알로라 나시
+  const quilava = data.evo[mon('quilava').id];
+  assert.ok(quilava.some(([id, it]) => id === mon('typhlosion-hisui').id && it === 'hisuiregion'));
+  assert.ok(quilava.some(([id]) => id === mon('typhlosion').id));
+  assert.ok(data.evo[mon('exeggcute').id].some(([id, it]) => id === mon('exeggutor-alola').id && it === 'alolaregion'));
+  // 게임 규칙 그대로: 가디는 히스이 가디가 따로 있어 대상 아님, 모자 폼으로 가는 갈래는 뺌
+  assert.ok(!data.evo[mon('growlithe').id].some(([, it]) => /region$/.test(it || '')));
+  assert.ok(!(data.evo[mon('pichu').id] || []).some(([, it]) => it === 'alolaregion'), ko(mon('pichu').id));
+  // 폼 변경 도구: 기라티나 오리진(지니면) · 로토무 5폼(쓰면) · 아르세우스 플레이트(타입만, 도감에 따로 없음)
+  const gira = data.formItems[mon('giratina-altered').id];
+  assert.deepEqual(gira.map(x => [x.id, x.item, x.hold]), [[mon('giratina-origin').id, 'griseous-core', true]]);
+  assert.equal(data.formItems[mon('rotom').id].length, 5);
+  assert.ok(data.formItems[mon('rotom').id].every(x => x.item === 'rotom-catalog' && !x.hold));
+  const fire = data.formItems[mon('arceus').id].find(x => x.item === 'flame-plate');
+  assert.ok(fire && fire.id === null && fire.t.join() === 'fire' && fire.hold);
+  // 심판의뭉치는 플레이트 타입, 테크노버스터는 카세트 타입으로 계산 (상성이 바뀜)
+  const arceus = mon('arceus');
+  const fireArceus = { ...arceus, t: ['fire'] };
+  const judg = { lv: 75, mv: ['judgment'], ab: 'multitype', na: 'modest', it: null, iv: [] };
+  const plain = builder.targetTable(arceus, judg), plated = builder.targetTable(fireArceus, { ...judg, it: 'flame-plate' });
+  const W = ctx.meta.reduce((a, m) => a + m.w, 0);
+  const avg = t => ctx.meta.reduce((a, m, q) => a + m.w * Math.min(t.best[q], 100), 0) / W;
+  assert.notEqual(avg(plain).toFixed(3), avg(plated).toFixed(3), '플레이트에 따라 심판의뭉치 데미지가 달라진다');
+  const gene = mon('genesect');
+  const tb = it => builder.targetTable(gene, { lv: 75, mv: ['techno-blast'], ab: gene.ab[0], na: 'modest', it, iv: [] });
+  assert.notEqual(avg(tb(null)).toFixed(3), avg(tb('douse-drive')).toFixed(3), '카세트에 따라 테크노버스터 타입이 바뀐다');
+});

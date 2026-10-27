@@ -938,3 +938,16 @@ button.type { border: 0; cursor: pointer; }
   .mega-row > .btn, .mega-row > .mega-on { grid-column: 3; grid-row: 1; }
 }
 .mega-warn { display: block; font-size: 10.5px; font-weight: 800; color: var(--warn); }
+
+/* 폼 추천 */
+.form-card .card-head h3 .sprite { width: 40px; height: 40px; margin: -10px -4px -10px -6px; }
+.fm-ref summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; cursor: pointer; list-style: none; }
+.fm-ref summary::-webkit-details-marker { display: none; }
+.fm-ref summary h3 { font-size: 16px; font-weight: 800; }
+.fm-ref summary .sub { font-size: 13px; color: var(--muted); }
+.fm-ref[open] { display: grid; gap: 8px; }
+.fm-ref .note { margin: 0; }
+.fm-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fm-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 10px 2px 2px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font-size: 12.5px; font-weight: 700; text-decoration: none; }
+.fm-chip .sprite { width: 28px; height: 28px; margin: -4px -2px; }
+.fm-chip em { font-style: normal; font-weight: 600; color: var(--muted); }

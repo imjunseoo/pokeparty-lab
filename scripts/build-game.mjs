@@ -333,14 +333,41 @@ function build({ dat, dex, sets, T }) {
 
   // ── 진화: 진화 전 dex id → [[최종 진화 dex id, 필요한 진화 도구 또는 null]] (리전폼은 같은 폼으로 진화) ──
   // 파티 추천은 진화 전 포켓몬도 최종 진화 기준으로 평가한다 (토너먼트 Lv.75 까지 레벨이 오르므로)
+  // 지방 폼 진화 (Board_Evolution REGION_ITEM_KEYWORDS): 기본 폼이 진화하는 대상에 그 지방 폼이 있으면 진화도구 상점의 지방 도구
+  //   (알로라의가면·가라르의차·히스이의골동품)로 그 폼으로 진화. 진화 전 포켓몬 자체에 그 지방 폼이 있으면 대상 아님 (가디 → 히스이 가디가 따로 있음)
+  const regionKeys = [...block(script('Board_Evolution'), 'REGION_ITEM_KEYWORDS', '{').matchAll(/(\w+):\s*\[([^\]]*)\]/g)]
+    .map(([, sym, list]) => [sym, [...list.matchAll(/"([^"]+)"/g)].map(m => m[1].toLowerCase())]);
+  //   게임은 폼 이름만 보므로 피카츄는 「Alola Cap」 때문에 지방 폼이 있는 것으로 판정돼 알로라 라이츄로 진화 못 하고,
+  //   피츄는 알로라의가면으로 모자 피카츄가 됨 → 판정은 게임 그대로, 진화 결과가 모자·메가·달마모드 폼인 갈래만 추천에서 뺌 (Board_Extra_Forms 의 예외와 같은 기준)
+  const regionalOf = new Map();   // `${지방 도구}|${종}` → 지방 폼 게임 키 (먼저 나오는 폼)
+  for (const [key, g] of gameMon) {
+    if (!g.data.form) continue;
+    const name = String(g.data.real_form_name || '').toLowerCase();
+    for (const [sym, words] of regionKeys) {
+      const k = `${sym}|${String(g.data.species)}`;
+      if (!regionalOf.has(k) && words.some(w => name.includes(w))) regionalOf.set(k, key);
+    }
+  }
+  const NOT_REGIONAL = /Cap|Mega|메가|Zen/i;
+  const forwardOf = g => (g.data.evolutions || []).filter(e => !(e.length >= 4 && e[3]) && String(e[1]) !== 'None');
   const nextOf = key => {
     const g = gameMon.get(key), form = g.data.form;
-    return (g.data.evolutions || []).filter(e => !(e.length >= 4 && e[3]) && String(e[1]) !== 'None').map(e => {
+    const out = forwardOf(g).map(e => {
       const target = String(e[0]);
       const to = (form && gameMon.has(`${target}_${form}`)) ? `${target}_${form}` : target;
       const how = /^Item/.test(String(e[1])) && e[2] ? item(String(e[2])) : null;
       return gameMon.has(to) ? [to, how] : null;
     }).filter(Boolean);
+    if (!form) {
+      for (const [sym] of regionKeys) {
+        if (regionalOf.has(`${sym}|${String(g.data.species)}`)) continue;
+        for (const e of forwardOf(g)) {
+          const r = regionalOf.get(`${sym}|${String(e[0]).replace(/_\d+$/, '')}`);
+          if (r && !NOT_REGIONAL.test(String(gameMon.get(r).data.real_form_name)) && !out.some(([to]) => to === r)) out.push([r, item(sym)]);
+        }
+      }
+    }
+    return out;
   };
   const evo = {};
   for (const [key, g] of gameMon) {
@@ -354,6 +381,43 @@ function build({ dat, dex, sets, T }) {
     walk(key, null, new Set([key]));
     finals.delete(g.dex.id);
     if (finals.size) evo[g.dex.id] = [...new Map([...(evo[g.dex.id] || []), ...finals])];
+  }
+
+  // ── 폼 변경 도구 (전용도구 칸 · 쓸 수 있는 포켓몬을 가졌을 때만 팜): 기본 폼 dex id → [{ id, item, hold, t, name }]
+  //   지니면 바뀜(백금옥·금강옥·백옥·구슬·가면·녹슨 검/방패·플레이트·메모리·카세트) / 쓰면 바뀜(로토무카탈로그·비추는거울·그라시데아꽃·굴레의항아리·운석)
+  //   id: 도감에 따로 있는 폼의 dex id, 없으면 null + t(그 폼의 타입: 아르세우스·실버디) — 게노세크트는 타입은 같고 테크노버스터 타입만 바뀜
+  const FORM_ITEM_TARGETS = {
+    GRISEOUSCORE: ['GIRATINA_1'], ADAMANTCRYSTAL: ['DIALGA_1'], LUSTROUSGLOBE: ['PALKIA_1'], REDORB: ['GROUDON_1'], BLUEORB: ['KYOGRE_1'],
+    ROTOMCATALOG: ['ROTOM_1', 'ROTOM_2', 'ROTOM_3', 'ROTOM_4', 'ROTOM_5'], REVEALGLASS: ['TORNADUS_1', 'THUNDURUS_1', 'LANDORUS_1', 'ENAMORUS_1'],
+    GRACIDEA: ['SHAYMIN_1'], PRISONBOTTLE: ['HOOPA_1'], METEORITE: ['DEOXYS_1', 'DEOXYS_2', 'DEOXYS_3'],
+    WELLSPRINGMASK: ['OGERPON_1'], HEARTHFLAMEMASK: ['OGERPON_2'], CORNERSTONEMASK: ['OGERPON_3'], RUSTEDSWORD: ['ZACIAN_1'], RUSTEDSHIELD: ['ZAMAZENTA_1'],
+  };
+  const PLATE_TYPE = { FLAMEPLATE: 'fire', SPLASHPLATE: 'water', ZAPPLATE: 'electric', MEADOWPLATE: 'grass', ICICLEPLATE: 'ice', FISTPLATE: 'fighting',
+    TOXICPLATE: 'poison', EARTHPLATE: 'ground', SKYPLATE: 'flying', MINDPLATE: 'psychic', INSECTPLATE: 'bug', STONEPLATE: 'rock',
+    SPOOKYPLATE: 'ghost', DRACOPLATE: 'dragon', DREADPLATE: 'dark', IRONPLATE: 'steel', PIXIEPLATE: 'fairy' };
+  const DRIVE_NAME = { DOUSEDRIVE: 'douse', SHOCKDRIVE: 'shock', BURNDRIVE: 'burn', CHILLDRIVE: 'chill' };
+  const formsOf = sp => [...gameMon].filter(([, g]) => String(g.data.species) === sp && g.data.form);
+  const typesOf = g => g.data.types.map(t => String(t).toLowerCase());
+  for (const sym of syms(block(shopSrc, 'SIGNATURE_ITEMS'))) {
+    if (PLATE_TYPE[sym]) FORM_ITEM_TARGETS[sym] = formsOf('ARCEUS').filter(([, g]) => typesOf(g).join() === PLATE_TYPE[sym]).map(([k]) => k).slice(0, 1);
+    const mem = sym.match(/^(\w+)MEMORY$/);
+    if (mem) FORM_ITEM_TARGETS[sym] = formsOf('SILVALLY').filter(([, g]) => typesOf(g).join() === mem[1].toLowerCase()).map(([k]) => k).slice(0, 1);
+    if (DRIVE_NAME[sym]) FORM_ITEM_TARGETS[sym] = formsOf('GENESECT').filter(([, g]) => String(g.data.real_form_name).toLowerCase().startsWith(DRIVE_NAME[sym])).map(([k]) => k);
+  }
+  const formItems = {};
+  for (const [sym, keys] of Object.entries(FORM_ITEM_TARGETS)) {
+    if (!itemBySym.has(sym)) continue;
+    for (const key of keys) {
+      const g = gameMon.get(key);
+      const base = g && defaultOf.get(String(g.data.species));
+      if (!g || !base) continue;
+      const own = g.dex.id !== base.id;   // 도감에 따로 있는 폼
+      const en = String(g.data.real_form_name || '');
+      (formItems[base.id] ||= []).push({
+        id: own ? g.dex.id : null, item: item(sym), hold: holdable(sym),
+        ...(own ? {} : { t: typesOf(g) }), name: koForm.get(en) || (own ? g.dex.ko : en),
+      });
+    }
   }
 
   // ── 야생 포획 등급 (보드 사파리): 원래 포획률 120↑ 흔함(0) · 45↑ 보통(1) · 그 밖 희귀(2) → 한 번 던질 때 65 / 50 / 35% ──
@@ -383,6 +447,8 @@ function build({ dat, dex, sets, T }) {
     tourneyShop,
     tourneyShopCount,
     signatureUsers,
+    formItems,
+    signaturePrice: priceOf('SIGNATURE_ITEM_PRICE'),
     evoItemPrice,
     maps,
     starters,
