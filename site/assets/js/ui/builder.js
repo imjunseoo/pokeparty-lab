@@ -11,7 +11,6 @@ import { searchSelect, defineOptions, setSearchValue } from './searchselect.js';
 
 const CLS = ['변화', '물리', '특수'];
 const NO_IV = [false, false, false, false, false, false];
-const ALL_IV = [true, true, true, true, true, true];
 const results = new WeakMap();   // 평가기 → Map(멤버 세팅 키 → 계산 결과)
 
 // 멤버 카드마다 고른 세팅 (멤버 번호 → 'best' | 추천 세팅 키 B·S·D·R·A). 저장하지 않음
@@ -117,7 +116,7 @@ function stepText(s) {
     case 'move': return `<span class="todo-where">기술 칸</span><b>${esc(book.bySlug.get(s.learn)?.ko || s.learn)}</b> 배우기${s.forget ? ` <em>← ${esc(book.bySlug.get(s.forget)?.ko || s.forget)} 잊기</em>` : ''}`;
     case 'na': return `<span class="todo-where">트레이닝 칸</span>성격 → <b>${natureLabel(s.to)}</b>`;
     case 'ab': return `<span class="todo-where">트레이닝 칸</span>특성 → <b>${esc(store.engine.abilityKo(s.to))}</b>`;
-    case 'iv': return `<span class="todo-where">트레이닝 칸</span>개체값 31로: <b>${s.stats.map(k => STAT_LABELS[k]).join(' → ')}</b> <em>(1회에 하나 · 금색병뚜껑이면 한 번에)</em>`;
+    case 'iv': return `<span class="todo-where">선택</span>개체값 31로 올릴 수 있으면: <b>${s.stats.map(k => STAT_LABELS[k]).join(' → ')}</b> <em>(트레이닝 칸 1회에 하나 · 금색병뚜껑이면 한 번에)</em>`;
     case 'it': return `<span class="todo-where">아이템·상점</span>${s.to ? `<b>${esc(itemName(s.to))}</b> 지니게 하기` : '도구 빼기'}`;
     default: return '';
   }
@@ -127,12 +126,13 @@ function stepText(s) {
 function todoHtml(t) {
   if (!t.steps.length) return `<p class="build-done">✔ 지금 세팅이 ${esc(t.title)}과 같아요.</p>`;
   const skill = t.steps.filter(s => s.kind === 'move').length;
-  const train = t.steps.reduce((a, s) => a + (s.kind === 'na' || s.kind === 'ab' ? 1 : s.kind === 'iv' ? s.stats.length : 0), 0);
+  const train = t.steps.filter(s => s.kind === 'na' || s.kind === 'ab').length;
+  const ivOnly = t.steps.every(s => s.optional);
   const diff = Math.round(t.top.score - t.now.score);
   return `<div class="build-todo">
     <h4>${esc(t.title)}까지 할 일 <span class="note">이득이 큰 순서 · 점수 ${diff >= 0 ? '+' : ''}${diff}</span></h4>
     <ol>${t.steps.map(s => `<li>${stepText(s)}<span class="gain">+${s.gain.toFixed(1)}</span></li>`).join('')}</ol>
-    <p class="note">${[skill && `기술 칸 ${skill}번`, train && `트레이닝 칸 ${train}번`].filter(Boolean).join(' · ') || '도구만 바꾸면'} 돼요.
+    <p class="note">${ivOnly ? '세팅은 목표와 같아요. 개체값은 올릴 수 있을 때만' : `${[skill && `기술 칸 ${skill}번`, train && `트레이닝 칸 ${train}번`].filter(Boolean).join(' · ') || '도구만 바꾸면'} 돼요 (개체값은 기본 20 기준, 올리기는 선택)`}.
       성격·특성·개체값은 마지막 상점의 민트·특성패치·금색병뚜껑으로도 바꿀 수 있어요.</p>
   </div>`;
 }
@@ -201,7 +201,8 @@ function substituteItem(b, pm, set, orig, allowedAll) {
  * @returns { set, rows: [{ orig, use }] (원래 순서, use 가 orig 와 다르면 대체 · null 이면 뺌),
  *            subs: [[원래 기술, 대체 기술]], dropped: [대체도 없는 기술], itemSub: [원래 도구, 대체 도구] | null, itemMissing }
  */
-function toGameSet(b, pm, ref) {
+// iv: 개체값 (최선 세팅과 같게 지금 개체값 · 기본 20 기준, 31 을 가정하지 않음)
+function toGameSet(b, pm, ref, iv = NO_IV) {
   const learnList = b.learnable(pm.mon);
   const learn = new Set(learnList.map(m => m.slug));
   const slots = (ref.mv || []).map(s => (Array.isArray(s) ? s : [s]));
@@ -217,7 +218,7 @@ function toGameSet(b, pm, ref) {
       let best = -Infinity;
       const pick = (start, chosen) => {
         if (chosen.length === 4) {
-          const v = b.evaluate(pm.mon, { lv: store.gameData.finalLevel, mv: chosen, iv: ALL_IV, ab: pm.ability, na: 'hardy' }).score;
+          const v = b.evaluate(pm.mon, { lv: store.gameData.finalLevel, mv: chosen, iv, ab: pm.ability, na: 'hardy' }).score;
           if (v > best) { best = v; mv = chosen.slice(); }
           return;
         }
@@ -238,7 +239,7 @@ function toGameSet(b, pm, ref) {
   const items = (Array.isArray(ref.it) ? ref.it : [ref.it]).filter(Boolean);
   const abilities = store.engine.abilitiesOf(pm.mon);
   const set = {
-    lv: store.gameData.finalLevel, mv: mv.slice(0, 4), iv: ALL_IV,
+    lv: store.gameData.finalLevel, mv: mv.slice(0, 4), iv,
     it: pm.stone || items.find(x => allowed.has(x)) || null,
     ab: (ref.ab || []).find(a => abilities.includes(a)) || pm.ability,
     na: (ref.na || []).find(n => NATURES[n]) || 'hardy',
@@ -289,11 +290,11 @@ export function substitutesFor(mon, ref) {
 function targetOptions(b, pm, r) {
   let map = results.get(b);
   if (!map) results.set(b, (map = new Map()));
-  const key = `opts|${pm.mon.id}|${pm.stone || ''}|${pm.ability}|${!!store.sets}|${setsOrder()}`;
+  const key = `opts|${pm.mon.id}|${pm.stone || ''}|${pm.ability}|${!!store.sets}|${setsOrder()}|${JSON.stringify(r.cur.iv)}`;
   if (!map.has(key)) {
     const refs = [];
     for (const ref of store.sets ? orderedSets(store.sets, pm.mon.id, setsOrder()) : []) {
-      const g = toGameSet(b, pm, ref);
+      const g = toGameSet(b, pm, ref, r.cur.iv);
       // 설명은 이 게임에서 실제로 쓰는 기술·도구(대체 포함)로, 노력치·성격은 원래 세팅 그대로
       const used = { ...ref, mv: g.set.mv, it: [g.set.it].filter(Boolean) };
       const { role } = describeSet(pm.mon, used, { double: store.game.battle === 'double' || ref.key === 'D' });

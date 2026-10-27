@@ -394,7 +394,9 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
   }
 
   /**
-   * 최선 세팅: 기술 → 성격 → 특성 → 도구 순으로 번갈아 고르기. 개체값은 모두 31 이 최선 (낮출 이유가 없음).
+   * 최선 세팅: 기술 → 성격 → 특성 → 도구 순으로 번갈아 고르기.
+   * 개체값은 지금 그대로(입력 안 하면 기본 20): 트레이닝 칸·금색병뚜껑으로 못 올리는 경우가 많아 31 을 가정하지 않는다
+   * (올리면 좋은 능력은 plan 의 선택 할 일).
    * opts.abilities: 고를 수 있는 특성, opts.fixedItem: 메가스톤처럼 정해진 도구
    */
   function optimize(mon, cur, opts = {}) {
@@ -410,8 +412,7 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
   }
 
   function optimizeFrom(mon, cur, { abilities = engine.abilitiesOf(mon), fixedItem = null } = {}) {
-    const full = [true, true, true, true, true, true];
-    let set = { ...cur, iv: full, ab: abilities.includes(cur.ab) ? cur.ab : abilities[0] || null, it: fixedItem || cur.it || null };
+    let set = { ...cur, iv: cur.iv || [], ab: abilities.includes(cur.ab) ? cur.ab : abilities[0] || null, it: fixedItem || cur.it || null };
     if (!set.na) set.na = 'hardy';
     const itemList = fixedItem ? [fixedItem] : items
       ? [null, ...[...items].filter(i => (MODELED_ITEMS.has(i) || prior(mon).it.has(i)) && itemOk(mon, i))]
@@ -433,7 +434,7 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
   }
 
   /**
-   * 지금 세팅 → 최선 세팅으로 가는 할 일 (이득이 큰 순서).
+   * 지금 세팅 → 최선 세팅으로 가는 할 일 (이득이 큰 순서, 개체값 올리기는 선택이라 맨 끝).
    * 기술: 하나씩 배울 때마다 가장 덜 아까운 기술을 잊는 순서 / 성격·특성: 트레이닝 칸 / 개체값: 트레이닝 칸 1회에 하나 / 도구
    */
   function plan(mon, cur, best) {
@@ -458,22 +459,25 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
       state = { ...state, mv: pickStep.mv };
       missing.splice(missing.indexOf(pickStep.add), 1);
     }
-    // 성격·특성·도구·개체값: 최선 세팅에서 그것만 지금 것으로 되돌렸을 때 잃는 점수 = 바꾸는 이득
+    // 성격·특성·도구: 최선 세팅에서 그것만 지금 것으로 되돌렸을 때 잃는 점수 = 바꾸는 이득
     const top = sc(best);
     for (const key of ['na', 'ab', 'it']) {
       if ((best[key] || null) === (cur[key] || null)) continue;
       steps.push({ kind: key, from: cur[key] || null, to: best[key] || null, gain: top - sc({ ...best, [key]: cur[key] || null }) });
     }
-    // 개체값은 한 줄로: 올릴 능력을 이득이 큰 순서로 (트레이닝 칸 1회에 하나, 금색병뚜껑이면 한 번에)
+    const out = steps.filter(s => s.gain > 0.05).sort((a, b) => b.gain - a.gain);
+    // 개체값(선택, 맨 끝 한 줄): 최선 세팅은 지금 개체값 기준이라, 하나씩 31로 올렸을 때 오르는 점수를 이득이 큰 순서로
+    //   (트레이닝 칸 1회에 하나, 금색병뚜껑이면 한 번에. 못 올리는 경우가 많아 다른 할 일 뒤에)
     const ivs = [];
     for (let i = 0; i < 6; i++) {
-      if (cur.iv?.[i] || !best.iv[i]) continue;
-      const iv = best.iv.slice(); iv[i] = false;
-      ivs.push({ stat: i, gain: top - sc({ ...best, iv }) });
+      if (cur.iv?.[i] || best.iv?.[i]) continue;
+      const iv = Array.from({ length: 6 }, (_, k) => !!best.iv?.[k] || k === i);
+      ivs.push({ stat: i, gain: sc({ ...best, iv }) - top });
     }
     ivs.sort((a, b) => b.gain - a.gain);
-    if (ivs.length) steps.push({ kind: 'iv', stats: ivs.map(x => x.stat), gains: ivs.map(x => x.gain), gain: ivs.reduce((a, x) => a + x.gain, 0) });
-    return steps.filter(s => s.gain > 0.05).sort((a, b) => b.gain - a.gain);
+    const useful = ivs.filter(x => x.gain > 0.05);
+    if (useful.length) out.push({ kind: 'iv', optional: true, stats: useful.map(x => x.stat), gains: useful.map(x => x.gain), gain: useful.reduce((a, x) => a + x.gain, 0) });
+    return out;
   }
 
   /**

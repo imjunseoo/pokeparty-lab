@@ -70,7 +70,10 @@ test('할 일: 이득이 큰 순서이고, 기술 할 일을 다 하면 최선 �
   const best = builder.optimize(m, cur);
   const steps = builder.plan(m, cur, best);
   assert.ok(steps.length > 0);
-  steps.forEach((s, k) => { assert.ok(s.gain > 0); if (k) assert.ok(steps[k - 1].gain >= s.gain); });
+  // 개체값 올리기는 선택이라 맨 끝, 나머지는 이득이 큰 순서
+  const main = steps.filter(x => !x.optional);
+  main.forEach((s, k) => { assert.ok(s.gain > 0); if (k) assert.ok(main[k - 1].gain >= s.gain); });
+  assert.ok(steps.findIndex(x => x.optional) === -1 || steps.findIndex(x => x.optional) === steps.length - 1);
   let mv = cur.mv.slice();
   for (const s of steps.filter(x => x.kind === 'move')) mv = s.forget ? mv.map(x => (x === s.forget ? s.learn : x)) : [...mv, s.learn];
   assert.deepEqual([...mv].sort(), [...best.mv].sort());
@@ -106,4 +109,20 @@ test('전용도구: 쓸 수 있는 포켓몬이 아니면 고르지 않는다 (�
   const best = b2.optimize(g, blank(g));
   assert.ok(!best.it?.endsWith('-plate'), '한카리아스에게 플레이트 없음');
   assert.ok(b2.itemAlternatives(g, best, { limit: 10 }).every(a => !a.it?.endsWith('-plate')));
+});
+
+test('개체값: 최선 세팅은 31을 가정하지 않고 지금 개체값(기본 20) 기준 · 올리기는 선택 할 일', () => {
+  const m = mon('garchomp');
+  const best = builder.optimize(m, blank(m));
+  assert.ok(![0, 1, 2, 3, 4, 5].some(k => best.iv?.[k]), '입력 안 하면 개체값 전부 기본 20');
+  // 입력한 개체값 31은 그대로
+  const mine = { ...blank(m), iv: [false, true, false, false, false, true] };
+  assert.deepEqual(builder.optimize(m, mine).iv, mine.iv);
+  // 할 일: 개체값은 선택 할 일 한 줄(맨 끝), 올리면 점수가 오르는 능력만
+  const steps = builder.plan(m, blank(m), best);
+  const iv = steps.find(x => x.kind === 'iv');
+  assert.ok(iv && iv.optional && steps[steps.length - 1] === iv);
+  assert.ok(iv.gains.every(g => g > 0) && iv.stats.length === iv.gains.length);
+  const up = builder.evaluate(m, { ...best, iv: [0, 1, 2, 3, 4, 5].map(k => iv.stats.includes(k)) }).score;
+  assert.ok(up > builder.evaluate(m, best).score, '개체값을 올리면 점수가 오른다');
 });
