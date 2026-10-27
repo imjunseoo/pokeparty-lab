@@ -156,10 +156,12 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
     };
   }
 
-  /** 기술 하나가 상대 후보 각각에게 주는 데미지 % (상한 없음) */
-  function movePcts(p, mv) {
-    const out = new Float32Array(p.targets.length);
-    if (!mv || mv.cat === 0 || (!mv.power && !mv.fx)) return out;
+  /**
+   * 기술 하나의 데미지 계산 준비 (특성·도구·자속·연속기·명중 보정). 공격 기술이 아니면 null.
+   * single: 1:1 대면 (더블에서도 범위기는 한 마리당 0.75)
+   */
+  function moveCalc(p, mv, { single = false } = {}) {
+    if (!mv || mv.cat === 0 || (!mv.power && !mv.fx)) return null;
     const { ab, it, st, lv } = p;
     let type = mv.type, pm = 1;
     if (type === 'normal' && ATE[ab]) { type = ATE[ab]; pm *= 1.2; }
@@ -192,21 +194,31 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
     if (ab === 'no-guard') acc = 1;
     const turn = mv.fx === 'charge' ? (it === 'power-herb' ? 1 : 0.5)
       : mv.fx === 'recoil' && (ab === 'rock-head' || ab === 'magic-guard') ? 1 : FX_MULT[mv.fx] || 1;
-    const spread = double && mv.flags & 256 ? 1.5 : 1;   // 더블: 둘을 함께 때림 (0.75 × 2)
-    const lvTerm = Math.floor(2 * lv / 5 + 2);
-    const row = ctx.eff[tIdx[type]];
-    for (const t of p.targets) {
-      let e = row[t.q];
-      if (e === 0) continue;
-      if (ab === 'tinted-lens' && e < 1) e *= 2;
-      if (it === 'expert-belt' && e > 1) e *= 1.2;
-      if (mv.fx === 'lvl') { out[t.q] = 100 * lv / t.hp * spread; continue; }
-      if (mv.fx === 'half') { out[t.q] = 50 * acc; continue; }
-      const atk = mv.fx === 'foul' ? t.atk : a;
-      const d = mv.cat === 1 || mv.fx === 'psy' ? t.def : t.spd;
-      const base = Math.floor(Math.floor(lvTerm * mv.power * pm * atk / d) / 50) + 2;
-      out[t.q] = 100 * base * mod * e * hits * acc * turn * spread / t.hp;
-    }
+    // 더블: 범위기는 둘을 함께 때림 (0.75 × 2), 1:1 대면이면 한 마리에 0.75
+    const spread = double && mv.flags & 256 ? (single ? 0.75 : 1.5) : 1;
+    return { mv, type, pm, a, mod, hits, acc, turn, spread, ab, it, lv, lvTerm: Math.floor(2 * lv / 5 + 2) };
+  }
+
+  /** 준비한 기술이 상대 t({ hp, atk, def, spd })에게 주는 데미지 % (상한 없음). e: 타입 상성 배율 */
+  function pctOn(c, t, e) {
+    if (e === 0) return 0;
+    if (c.ab === 'tinted-lens' && e < 1) e *= 2;
+    if (c.it === 'expert-belt' && e > 1) e *= 1.2;
+    if (c.mv.fx === 'lvl') return 100 * c.lv / t.hp * c.spread;
+    if (c.mv.fx === 'half') return 50 * c.acc;
+    const atk = c.mv.fx === 'foul' ? t.atk : c.a;
+    const d = c.mv.cat === 1 || c.mv.fx === 'psy' ? t.def : t.spd;
+    const base = Math.floor(Math.floor(c.lvTerm * c.mv.power * c.pm * atk / d) / 50) + 2;
+    return 100 * base * c.mod * e * c.hits * c.acc * c.turn * c.spread / t.hp;
+  }
+
+  /** 기술 하나가 상대 후보 각각에게 주는 데미지 % (상한 없음) */
+  function movePcts(p, mv) {
+    const out = new Float32Array(p.targets.length);
+    const c = moveCalc(p, mv);
+    if (!c) return out;
+    const row = ctx.eff[tIdx[c.type]];
+    for (const t of p.targets) out[t.q] = pctOn(c, t, row[t.q]);
     return out;
   }
 
@@ -465,6 +477,63 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
   }
 
   /**
+   * 이 맵 상대 후보 하나하나와의 대면표 (상대 타입별 대응용):
+   * best[q] 내 기술 중 가장 큰 데미지 %(상한 없음), move[q] 그 기술 번호, taken[q] 상대 자속 공격에 받는 %, faster[q] 내가 빠름
+   */
+  function targetTable(mon, set) {
+    const p = profile(mon, set);
+    const moves = (set.mv || []).map(s => book.bySlug.get(s)).filter(Boolean);
+    const pcts = moves.map(mv => movePcts(p, mv));
+    const n = p.targets.length, spe = speedOf(p);
+    const best = new Float32Array(n), move = new Int8Array(n).fill(-1), taken = new Float32Array(n), faster = new Uint8Array(n);
+    for (const t of p.targets) {
+      for (let k = 0; k < pcts.length; k++) if (pcts[k][t.q] > best[t.q]) { best[t.q] = pcts[k][t.q]; move[t.q] = k; }
+
+      taken[t.q] = takenPct(p, t);
+      faster[t.q] = spe > t.spe ? 1 : 0;
+    }
+    return { moves: moves.map(mv => mv.slug), best, move, taken, faster };
+  }
+
+  /** 방어 쪽 실능치 (돌격조끼·진화의휘석·퍼코트 · 멀티스케일 등은 받는 데미지 배율 mult) */
+  const defender = p => ({
+    hp: p.st[0], atk: p.st[1], def: p.st[2] * (p.ab === 'fur-coat' ? 2 : 1) * (p.it === 'eviolite' && p.canEvolve ? 1.5 : 1),
+    spd: p.st[4] * (p.it === 'assault-vest' ? 1.5 : 1) * (p.it === 'eviolite' && p.canEvolve ? 1.5 : 1),
+    mult: (p.ab === 'multiscale' || p.ab === 'shadow-shield' ? 0.75 : 1), ice: p.ab === 'ice-scales',
+  });
+  /** 기술마다 상대에게 주는 데미지 % (맞았을 때, 명중 acc 는 따로) · 기댓값(pct × acc) 큰 순 */
+  function hitsOn(p, foe, foeDef) {
+    const out = [];
+    for (const slug of p.set.mv || []) {
+      const mv = book.bySlug.get(slug);
+      const c = moveCalc(p, mv, { single: true });
+      if (!c) continue;
+      let pct = pctOn(c, foeDef, foe.def[tIdx[c.type]]) * foeDef.mult;
+      if (foeDef.ice && mv.cat === 2) pct *= 0.5;
+      const acc = c.acc || 1;
+      out.push({ slug, pct: pct / acc, acc, prio: mv.prio > 0 });
+    }
+    return out.sort((a, b) => b.pct * b.acc - a.pct * a.acc);
+  }
+
+  /**
+   * 1:1 대면: 내 세팅 vs 상대(foe, foeSet = 상대 세팅). 상대 공격 기술이 없으면 자속 위력 90 으로.
+   * @returns { mine: [{ slug, pct(맞았을 때), acc, prio }], theirs: [...], taken(상대 기술이 맞았을 때 최고 %), mySpeed, foeSpeed }
+   */
+  function duel(mon, set, foe, foeSet) {
+    const p = { ...profile(mon, set), set };
+    const fp = { ...profile(foe, foeSet), set: foeSet };
+    // 위협(intimidate): 나온 상대의 공격 −1 → 물리 기술 2/3
+    const intim = (list, ab) => (ab === 'intimidate' ? list.map(x => (book.bySlug.get(x.slug)?.cat === 1 ? { ...x, pct: x.pct * 2 / 3 } : x)).sort((x, y) => y.pct - x.pct) : list);
+    const mine = intim(hitsOn(p, fp, defender(fp)), foeSet.ab);
+    const theirs = intim(hitsOn(fp, p, defender(p)), set.ab);
+    // 받는 피해는 맞았을 때 기준 (가장 아픈 기술)
+    const taken = theirs.length ? Math.max(...theirs.map(x => x.pct))
+      : takenPct(p, { atk: fp.st[1], spa: fp.st[3], stabs: engine.stabTypes(foe).map(s => tIdx[s]) });
+    return { mine, theirs, taken, mySpeed: speedOf(p), foeSpeed: speedOf(fp) };
+  }
+
+  /**
    * 목표 도구를 못 구했을 때 대신 지닐 도구 (상점·아이템 칸 도구는 무작위라 노린 도구가 안 나오기 쉬움).
    * 고를 수 있는 도구 중 점수가 높은 순 + 도구 없이. @returns [{ it | null, diff(목표 대비 점수 차) }]
    */
@@ -477,5 +546,5 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
     return [...list, { it: null, diff: evaluate(mon, { ...set, it: null }).score - base }];
   }
 
-  return { evaluate, optimize, plan, learnable, relearnOnly, relearn, itemAlternatives, profile, statsAt: (mon, set) => profile(mon, set).st, level };
+  return { evaluate, optimize, plan, learnable, relearnOnly, relearn, itemAlternatives, targetTable, duel, profile, statsAt: (mon, set) => profile(mon, set).st, level };
 }
