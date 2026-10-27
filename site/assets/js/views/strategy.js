@@ -5,7 +5,7 @@ import {
   store, update, getContext, partyMembers, isGameMode, gameRule, getBuilder, loadMoves, evoOptions, allowedItems, setMode,
   GAME_MODE, toggleRelearn, relearnToast, setItemMode, itemMode,
 } from '../state.js';
-import { analyzeMember, selectedTarget, natureLabel, itemAlts } from '../ui/builder.js';
+import { analyzeMember, selectedTarget, natureLabel, itemAlts, learnKind, relearnSub } from '../ui/builder.js';
 import { tileActions, growthPicks, holderRank } from '../core/strategy.js';
 import { ITEM_MODES } from '../core/build.js';
 import { recommendTypes, memberValues } from '../core/party.js';
@@ -13,7 +13,7 @@ import { STAT_LABELS } from '../core/engine.js';
 import { esc, on, toast, josa } from '../ui/dom.js';
 import { sprite, typeBadge } from '../ui/components.js';
 import { itemName, itemSource, itemPartyWarning, catchHint } from '../ui/reasons.js';
-import { relearnToggle, itemModeControl } from '../ui/sets.js';
+import { relearnToggle, relearnSubChip, itemModeControl } from '../ui/sets.js';
 import { searchSelect, defineOptions, bindSearchSelects } from '../ui/searchselect.js';
 import { openSetEditor } from './party.js';
 
@@ -77,7 +77,9 @@ function rowsOf(b, members) {
     const target = sel?.set || r.best;
     const key = `${pm.mon.id}|${pm.stone || ''}|${JSON.stringify(r.cur)}|${JSON.stringify(target)}`;
     if (!map.has(key)) map.set(key, m.set && sel?.key === 'best' ? r.steps : b.plan(pm.mon, r.cur, target));
-    return { i, m, pm, mon: pm.mon, known: !!m.set, cur: r.cur, target, steps: map.get(key), stone: pm.stone, sel };
+    const lv = r.cur.lv || store.gameData.finalLevel;
+    return { i, m, pm, mon: pm.mon, known: !!m.set, cur: r.cur, target, steps: map.get(key), stone: pm.stone, sel, lv,
+      free: slug => learnKind(b, pm.mon, slug, lv)?.kind === 'level' };
   });
 }
 
@@ -148,7 +150,7 @@ function summaryCard(rows, acts) {
   const known = rows.filter(r => r.known).length;
   const empty = 6 - rows.length;
   const tiles = [
-    acts.skill[0] && { name: '기술 칸', gain: acts.skill[0].gain, cls: 'ic-skill' },
+    acts.skill.find(a => !a.free) && { name: '기술 칸', gain: acts.skill.find(a => !a.free).gain, cls: 'ic-skill' },
     acts.training[0] && { name: '트레이닝 칸', gain: acts.training[0].gain, cls: 'ic-train' },
     acts.items[0] && { name: '아이템 칸·상점', gain: acts.items[0].gain, cls: 'ic-item' },
   ].filter(Boolean).sort((a, b) => b.gain - a.gain);
@@ -166,18 +168,25 @@ function summaryCard(rows, acts) {
 
 function skillCard(rows, skill, b) {
   const unknown = rows.filter(r => !r.known);
-  const list = actList(skill, a => {
+  const row = a => {
     const r = rows[a.i];
-    return `<li>${who(r)}<span class="st-what"><b>${esc(moveKo(a.learn))}</b> 배우기${a.forget ? ` <em>← ${esc(moveKo(a.forget))} 잊기</em>` : ''}</span>${gainText(a.gain)}${doneBtn(r, `${a.i}|move|${a.learn}|${a.forget || ''}`)}</li>`;
-  });
+    // 기술 칸 기술: 기술 칸·기술머신을 못 구하면 기술 떠올리기로 대신 배울 레벨업 기술 (떠올리기 대체 ON)
+    const sub = !a.free && store.game.relearn !== false ? relearnSub(b, r.mon, r.target, a.learn, r.lv) : null;
+    return `<li>${who(r)}<span class="st-what"><b>${esc(moveKo(a.learn))}</b> 배우기${a.forget ? ` <em>← ${esc(moveKo(a.forget))} 잊기</em>` : ''}${sub ? relearnSubChip(sub) : ''}</span>${gainText(a.gain)}${doneBtn(r, `${a.i}|move|${a.learn}|${a.forget || ''}`)}</li>`;
+  };
+  const free = skill.filter(a => a.free), tile = skill.filter(a => !a.free);
+  const freeList = free.length ? `<div class="st-free"><h4 class="st-sub">지금 바로 · 기술 칸 필요 없음</h4>
+    <p class="note">레벨업 기술이라 「내 포켓몬 확인 → 기술 떠올리기」로 언제든 다시 배워요. 내 차례에 먼저 해 두세요.</p>
+    <ol class="st-acts plain">${free.map(row).join('')}</ol></div>` : '';
   const missing = unknown.length ? `<div class="st-unknown"><p class="note">지금 기술을 몰라서 순위에서 뺀 멤버 (목표 기술)</p>
     ${unknown.map(r => `<div class="st-unk-row">${who(r)}<span class="st-what">${r.target.mv.map(s => esc(moveKo(s))).join(' · ')}</span>${doneBtn(r, '')}</div>`).join('')}</div>` : '';
   return `<section class="card st-card">
     ${tileHead('ic-skill', '기술 칸', '한 번에 한 마리 · 기술 하나')}
     <p class="note st-rule">레벨업·교배·가르침·기술머신 기술을 「기술 떠올리기」 화면에서 가르쳐요. 학습장치(파티 아이템)도 같은 일을 해요.</p>
-    ${list || (unknown.length < rows.length ? '<p class="build-done">✔ 세팅을 입력한 멤버는 배울 기술이 없어요.</p>' : '')}
+    ${freeList}
+    ${tile.length ? `${free.length ? '<h4 class="st-sub">기술 칸에서 (레벨업으로는 못 배우는 기술)</h4>' : ''}${actList(tile, row)}` : (unknown.length < rows.length && !free.length ? '<p class="build-done">✔ 세팅을 입력한 멤버는 배울 기술이 없어요.</p>' : '')}
     ${missing}
-    <div class="st-foot">${relearnToggle(b.relearn)}</div>
+    <div class="st-foot">${relearnToggle(store.game.relearn !== false)}</div>
   </section>`;
 }
 

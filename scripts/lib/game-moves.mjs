@@ -7,8 +7,10 @@
 //   효과: crit 급소 확정 · charge 모으는 2턴(미래예지 포함) · recharge 다음 턴 쉼 · selfko 자폭 · lvl 레벨만큼 고정 · half 상대 HP 절반
 //         def 방어로 공격(바디프레스) · foul 상대 공격으로(속임수) · psy 특수기지만 상대 방어로(사이코쇼크)
 //         cond 조건부 성공(힘껏펀치 등) · first 첫 턴만(속이기) · drop 쓰면 능력 하락(오버히트) · lock 난동 · recoil 반동 · knock 탁쳐서떨구기
-// learn[dex id] = 기술 번호 배열 (진화 전 단계에서 물려받는 기술 포함). 레벨업으로는 못 배우고 기술 칸·학습장치의
-//   「기술 떠올리기」로만 배우는 기술(교배·가르침·기술머신)은 -(번호 + 1)
+// learn[dex id] = 기술 배열 (진화 전 단계에서 물려받는 기술 포함)
+//   레벨업 기술(놓쳐도 「내 포켓몬 확인 → 기술 떠올리기」로 다시 배움) = 번호 + LEVEL_BASE × 배우는 레벨
+//   레벨업으로는 못 배우는 기술(기술머신·가르침·교배 → 기술 칸·학습장치·기술머신) = -(번호 + 1)
+export const LEVEL_BASE = 1000;
 
 const FLAG_BITS = { Contact: 1, Punching: 2, Biting: 4, Pulse: 8, Slicing: 16, Sound: 32, HighCriticalHitRate: 64 };
 const SPREAD = new Set(['AllNearFoes', 'AllNearOthers']);
@@ -55,9 +57,9 @@ function fxOf(code) {
 
 /**
  * moves: moves.dat (Map 게임 기술 ID → GameData::Move), slugOf: 게임 기술 ID → 사이트 slug, nameOf: (slug, 영문명) → 한글명
- * learnOf: dex id → Set(게임 기술 ID 의 toId), ids: 습득표를 만들 dex id 목록, toId
+ * learnOf: dex id → Set(게임 기술 ID 의 toId), levelOf: dex id → Map(레벨업 기술 → 배우는 레벨), ids: 습득표를 만들 dex id 목록, toId
  */
-export function buildMoves({ moves, slugOf, nameOf, learnOf, relearnOf = () => [], ids, toId }) {
+export function buildMoves({ moves, slugOf, nameOf, learnOf, levelOf = () => new Map(), ids, toId }) {
   const list = [], index = new Map();
   for (const [key, m] of moves) {
     const flags = (m.flags || []).map(String);
@@ -77,10 +79,11 @@ export function buildMoves({ moves, slugOf, nameOf, learnOf, relearnOf = () => [
     ]);
   }
   const learn = {};
+  if (list.length >= LEVEL_BASE) throw new Error(`기술이 ${LEVEL_BASE}개를 넘어 습득표 인코딩을 바꿔야 함`);
   for (const dexId of ids) {
-    const re = relearnOf(dexId);
+    const lv = levelOf(dexId);
     const idx = [...learnOf(dexId)].filter(mv => index.has(mv)).sort((a, b) => index.get(a) - index.get(b));
-    if (idx.length) learn[dexId] = idx.map(mv => (re.has(mv) ? -(index.get(mv) + 1) : index.get(mv)));
+    if (idx.length) learn[dexId] = idx.map(mv => (lv.has(mv) ? index.get(mv) + LEVEL_BASE * lv.get(mv) : -(index.get(mv) + 1)));
   }
   return { list, learn };
 }

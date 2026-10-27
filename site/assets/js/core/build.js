@@ -83,19 +83,22 @@ const FX_MULT = { recharge: 0.6, selfko: 0.35, cond: 0.3, first: 0.25, drop: 0.8
 const ATTACK_BONUS = { 'u-turn': 1.5, 'volt-switch': 1.5, 'flip-turn': 1.5, 'knock-off': 1.5, 'rapid-spin': 1, 'fake-out': 1 };
 
 /**
- * moves.json → { list, bySlug, learn(id), relearn(id) }
- * relearn(id): 레벨업으로는 못 배우고 기술 칸·학습장치의 「기술 떠올리기」로만 배우는 기술 slug (습득표에 -(번호 + 1)로 표시)
+ * moves.json → { list, bySlug, learn(id), levels(id) }
+ * levels(id): 레벨업 기술 slug → 배우는 레벨 (놓치거나 잊어도 「내 포켓몬 확인 → 기술 떠올리기」로 그 레벨 이후 다시 배움).
+ *   여기 없는 기술은 기술머신·가르침·교배 기술 (기술 칸·학습장치·기술머신으로만 배움). 습득표: 레벨업 = 번호 + LEVEL_BASE × 레벨, 그 밖 = -(번호 + 1)
  */
+export const LEVEL_BASE = 1000;
 export function createMoveBook(json) {
   const list = json.list.map(([slug, ko, type, cat, power, acc, prio, flags, hits, fx], i) => ({ i, slug, ko, type, cat, power, acc, prio, flags, hits, fx }));
   const bySlug = new Map(list.map(m => [m.slug, m]));
   const rows = id => json.learn[id] || [];
-  const reCache = new Map();
-  const relearn = id => {
-    if (!reCache.has(id)) reCache.set(id, new Set(rows(id).filter(i => i < 0).map(i => list[-i - 1].slug)));
-    return reCache.get(id);
+  const at = i => list[i < 0 ? -i - 1 : i % LEVEL_BASE];
+  const lvCache = new Map();
+  const levels = id => {
+    if (!lvCache.has(id)) lvCache.set(id, new Map(rows(id).filter(i => i >= 0).map(i => [at(i).slug, Math.floor(i / LEVEL_BASE)])));
+    return lvCache.get(id);
   };
-  return { list, bySlug, learn: id => rows(id).map(i => list[i < 0 ? -i - 1 : i]), relearn };
+  return { list, bySlug, learn: id => rows(id).map(at), levels };
 }
 
 /** Lv·개체값(31이면 true)·성격으로 실제 능력치 [H, A, B, C, D, S] (노력치 0) */
@@ -116,9 +119,8 @@ export function statsAt(base, level, iv = [], nature = null) {
  * opts.level: 기본 레벨 (게임 마지막 Lv.75), opts.battle: 'single' | 'double', opts.sets: sets.json (추천 세팅 = 사전 지식)
  * opts.items: 이 룰에서 구할 수 있는 도구 Set (없으면 도구는 계산에서 고르지 않음)
  */
-// relearn: 기술 떠올리기(교배·가르침·기술머신) 기술까지 쓸지. false 면 레벨업 기술만으로 최선 세팅·대체 기술을 고른다
 // itemOk(mon, it): 그 포켓몬이 구할 수 있는 도구인지 (전용도구 칸은 쓸 수 있는 포켓몬을 가졌을 때만 팜: 플레이트 → 아르세우스 등)
-export function createBuilder(ctx, book, { level = 75, battle = 'single', sets = null, items = null, relearn = true, itemOk = () => true } = {}) {
+export function createBuilder(ctx, book, { level = 75, battle = 'single', sets = null, items = null, itemOk = () => true } = {}) {
   const { engine } = ctx;
   const { tIdx } = engine;
   const double = battle === 'double';
@@ -339,19 +341,21 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
     return engine.dex.pokemon.find(p => p.sp === mon.sp && !p.mega && book.learn(p.id).length)?.id ?? mon.id;
   }
   /** 기술 떠올리기로만 배우는 기술 slug Set */
-  const relearnOnly = mon => book.relearn?.(learnId(mon)) || new Set();
+  /** 레벨업 기술 → 배우는 레벨 (기술 떠올리기로 다시 배울 수 있는 기술). 여기 없으면 기술 칸·기술머신 기술 */
+  const learnLevels = mon => book.levels?.(learnId(mon)) || new Map();
+  /** 레벨 lv 에서 「내 포켓몬 확인 → 기술 떠올리기」로 배울 수 있는 기술 (레벨업 기술 중 lv 이하) */
+  const relearnable = (mon, lv = level) => {
+    const lvs = learnLevels(mon);
+    return book.learn(learnId(mon)).filter(m => lvs.has(m.slug) && lvs.get(m.slug) <= lv);
+  };
 
   /**
    * 배울 수 있는 기술 (습득표가 없으면 추천 세팅·지금 기술).
    * 기술 떠올리기를 끄면 레벨업 기술만 (all: true 면 끈 것과 상관없이 전부 — 내 세팅 입력용)
    */
-  function learnable(mon, set = {}, { all = false } = {}) {
+  function learnable(mon, set = {}) {
     const list = book.learn(learnId(mon));
-    if (list.length) {
-      if (relearn || all) return list;
-      const re = relearnOnly(mon);
-      return list.filter(m => !re.has(m.slug));
-    }
+    if (list.length) return list;
     const extra = [...prior(mon).mv.keys(), ...(set.mv || [])].map(s => book.bySlug.get(s)).filter(Boolean);
     return [...new Set(extra)];
   }
@@ -558,5 +562,5 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
     return [...list, { it: null, diff: evaluate(mon, { ...set, it: null }).score - base }];
   }
 
-  return { evaluate, optimize, plan, learnable, relearnOnly, relearn, itemAlternatives, targetTable, duel, profile, statsAt: (mon, set) => profile(mon, set).st, level };
+  return { evaluate, optimize, plan, learnable, learnLevels, relearnable, itemAlternatives, targetTable, duel, profile, statsAt: (mon, set) => profile(mon, set).st, level };
 }

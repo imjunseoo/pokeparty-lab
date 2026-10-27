@@ -951,3 +951,17 @@ button.type { border: 0; cursor: pointer; }
 .fm-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 10px 2px 2px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font-size: 12.5px; font-weight: 700; text-decoration: none; }
 .fm-chip .sprite { width: 28px; height: 28px; margin: -4px -2px; }
 .fm-chip em { font-style: normal; font-weight: 600; color: var(--muted); }
+
+/* 기술 얻는 방법: 레벨업(기술 떠올리기로 다시 배움) · Lv.N · 기술 칸 + 떠올리기 대체 */
+.lm { display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 5px; font-size: 10.5px; font-weight: 800; vertical-align: 1px; cursor: help; white-space: nowrap; }
+.lm-level { background: var(--good-soft); color: var(--good); }
+.lm-later { background: var(--surface-3); color: var(--muted); }
+.lm-tech { background: var(--warn-soft); color: var(--warn); }
+.re-sub { display: inline-flex; align-items: baseline; gap: 3px; margin-left: 6px; padding: 0 6px; border-radius: 6px; border: 1px dashed var(--good); font-size: 11.5px; color: var(--good); white-space: nowrap; cursor: help; }
+.re-sub b { font-weight: 800; }
+.re-sub .sub-arrow { color: var(--good); }
+.todo-where.free { background: var(--good-soft); color: var(--good); }
+.re-note .lv { color: var(--good); }
+.re-note b:first-child { color: var(--warn); }
+.st-free { display: grid; gap: 4px; padding: 8px 10px; border-radius: 10px; background: var(--good-soft); }
+.st-free .st-sub { margin: 0; color: var(--good); }

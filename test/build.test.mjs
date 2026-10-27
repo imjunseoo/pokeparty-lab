@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createEngine } from '../site/assets/js/core/engine.js';
 import { createContext } from '../site/assets/js/core/party.js';
-import { createMoveBook, createBuilder, statsAt, NATURES } from '../site/assets/js/core/build.js';
+import { createMoveBook, createBuilder, statsAt, NATURES, LEVEL_BASE } from '../site/assets/js/core/build.js';
 
 const load = p => JSON.parse(readFileSync(new URL(p, import.meta.url), 'utf8'));
 const dex = load('../site/data/pokedex.json');
@@ -28,23 +28,22 @@ test('능력치: Lv.75 · 개체값 20/31 · 노력치 0 · 성격 보정', () =
 
 test('기술 데이터: 모든 습득표 번호가 기술 표 안에 있고, 한글 이름이 있다', () => {
   const json = load('../site/data/game/moves.json');
-  for (const list of Object.values(json.learn)) for (const i of list) assert.ok(json.list[i < 0 ? -i - 1 : i], `기술 번호 ${i}`);
+  for (const list of Object.values(json.learn)) for (const i of list) assert.ok(json.list[i < 0 ? -i - 1 : i % LEVEL_BASE], `기술 번호 ${i}`);
   assert.ok(json.list.every(m => /[가-힣]/.test(m[1])), '한글 이름');
   assert.ok(book.learn(mon('garchomp').id).some(m => m.slug === 'earthquake'), '한카리아스는 지진을 배운다');
 });
 
-test('기술 떠올리기: 레벨업 기술과 떠올리기 전용(교배·가르침·기술머신) 기술을 나누고, 끄면 레벨업 기술만 쓴다', () => {
+test('기술 떠올리기: 레벨업 기술은 배우는 레벨과 함께 (「내 포켓몬 확인 → 기술 떠올리기」로 다시 배움), 기술머신·가르침·교배 기술은 따로', () => {
   const g = mon('garchomp');
-  const re = book.relearn(g.id);
-  assert.ok(!re.has('dragon-claw') && book.learn(g.id).some(x => x.slug === 'dragon-claw'), '드래곤클로는 한카리아스 레벨업 기술');
-  assert.ok(re.has('earthquake'), '지진은 기술머신 → 떠올리기');
-  assert.ok(re.has('draco-meteor') || re.has('outrage'), '용성군·역린은 떠올리기(교배) 기술');
-  const off = createBuilder(ctx, book, { level: 75, sets, items, relearn: false });
-  const lvOnly = new Set(off.learnable(g).map(x => x.slug));
-  assert.ok(lvOnly.size && [...lvOnly].every(sl => !re.has(sl)), '끄면 떠올리기 전용 기술 없음');
-  assert.equal(off.learnable(g, {}, { all: true }).length, builder.learnable(g).length, '입력 폼은 전부');
-  const best = off.optimize(g, blank(g));
-  assert.ok(best.mv.every(sl => lvOnly.has(sl)), '최선 세팅도 레벨업 기술만');
+  const lvs = book.levels(g.id);
+  assert.equal(lvs.get('dragon-claw'), 36, '드래곤클로는 한카리아스 Lv.36 레벨업 기술');
+  assert.ok(lvs.has('sand-attack') && lvs.get('sand-attack') <= 1, '첫 진화 단계(딥상어동) 레벨업 기술도 떠올리기로');
+  assert.ok(!lvs.has('earthquake') && book.learn(g.id).some(x => x.slug === 'earthquake'), '지진은 기술머신 → 기술 칸');
+  // 레벨에 따라 떠올리기로 배울 수 있는 기술이 늘어남, 최선 세팅은 모든 기술로
+  const at30 = new Set(builder.relearnable(g, 30).map(x => x.slug)), at75 = new Set(builder.relearnable(g, 75).map(x => x.slug));
+  assert.ok(!at30.has('dragon-claw') && at75.has('dragon-claw'));
+  assert.ok([...at75].every(sl => lvs.has(sl)), '떠올리기는 레벨업 기술만');
+  assert.equal(builder.learnable(g).length, book.learn(g.id).length, '최선 세팅·입력 폼은 기술 칸 기술까지 전부');
 });
 
 test('최선 세팅: 배울 수 있는 기술 4개 · 고른 특성/성격이 유효 · 지금 세팅보다 점수가 높다', () => {

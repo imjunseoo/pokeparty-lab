@@ -3,9 +3,10 @@
 //   아이템 칸·상점: 지닐 도구 / 육성 파티 아이템(학습장치 · 이상한사탕 · 종합민트 · 특성패치 · 금색병뚜껑)
 
 /**
- * rows: [{ i, mon, known(세팅 입력함), cur, target, steps }] (steps = b.plan(mon, cur, target))
+ * rows: [{ i, mon, known(세팅 입력함), cur, target, steps, free(slug) }] (steps = b.plan(mon, cur, target),
+ *   free: 레벨업 기술이라 기술 칸 없이 「내 포켓몬 확인 → 기술 떠올리기」로 바로 배우는지)
  * 기술은 지금 기술을 알아야 잴 수 있어서 세팅을 입력한 멤버만, 성격·특성·개체값·도구는 입력 전이면 기본값(무보정·개체값 20·도구 없음) 기준
- * @returns { skill: [{ i, learn, forget, gain }], training: [{ i, kind: 'na'|'ab'|'iv', to | stat, gain, assumed }],
+ * @returns { skill: [{ i, learn, forget, gain, free }], training: [{ i, kind: 'na'|'ab'|'iv', to | stat, gain, assumed }],
  *            items: [{ i, to, from, gain, assumed }] } (각각 gain 큰 순)
  */
 export function tileActions(rows) {
@@ -13,7 +14,7 @@ export function tileActions(rows) {
   for (const r of rows) {
     const assumed = !r.known;
     for (const s of r.steps) {
-      if (s.kind === 'move') { if (r.known) skill.push({ i: r.i, learn: s.learn, forget: s.forget, gain: s.gain }); }
+      if (s.kind === 'move') { if (r.known) skill.push({ i: r.i, learn: s.learn, forget: s.forget, gain: s.gain, free: !!r.free?.(s.learn) }); }
       else if (s.kind === 'na' || s.kind === 'ab') training.push({ i: r.i, kind: s.kind, to: s.to, gain: s.gain, assumed });
       else if (s.kind === 'iv') s.stats.forEach((stat, k) => training.push({ i: r.i, kind: 'iv', stat, gain: s.gains?.[k] ?? s.gain / s.stats.length, assumed }));
       else if (s.kind === 'it' && s.to) items.push({ i: r.i, to: s.to, from: s.from, gain: s.gain, assumed });
@@ -25,7 +26,7 @@ export function tileActions(rows) {
 
 /**
  * 육성 파티 아이템마다 가장 이득이 큰 멤버 (일반 상점의 파티 아이템 칸 · 마지막 상점).
- * 학습장치 = 기술 하나 바꾸기(기술 칸 1번과 같음), 종합민트 = 성격, 특성패치 = 특성, 금색병뚜껑 = 개체값 전부 31, 이상한사탕 = 레벨 +1
+ * 학습장치 = 기술 하나 바꾸기(기술 칸 1번과 같음, 기술 떠올리기로 바로 되는 레벨업 기술은 빼고), 종합민트 = 성격, 특성패치 = 특성, 금색병뚜껑 = 개체값 전부 31, 이상한사탕 = 레벨 +1
  * @returns { [key]: { i, gain, step } | null }
  */
 export function growthPicks(b, rows) {
@@ -45,7 +46,7 @@ export function growthPicks(b, rows) {
     if (gain > 0.05 && (!candy || gain > candy.gain)) candy = { i: r.i, gain, step: null, assumed: false };
   }
   return {
-    exp_share: best((r, s) => (r.known && s.kind === 'move' ? s : null)),
+    exp_share: best((r, s) => (r.known && s.kind === 'move' && !r.free?.(s.learn) ? s : null)),
     mint: best((r, s) => (s.kind === 'na' ? s : null)),
     ability_patch: best((r, s) => (s.kind === 'ab' ? s : null)),
     gold_bottle_cap: best((r, s) => (s.kind === 'iv' ? s : null)),

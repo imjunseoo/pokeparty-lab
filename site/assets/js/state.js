@@ -19,7 +19,7 @@ export const store = {
   moves: null,      // 게임 기술 표 + 습득표 (moves.json, 내 세팅을 쓸 때만 로드) → createMoveBook
   mode: TYPE_MODE,
   filters: { game: 'all', legend: false, mega: false, minBst: 450, usageMega: true },
-  // relearn: 기술 떠올리기(기술 칸·학습장치의 교배·가르침·기술머신 기술)까지 추천·대체에 쓸지
+  // relearn: 기술 칸·기술머신·가르침 기술 옆에 「내 포켓몬 확인 → 기술 떠올리기」로 대신 배울 레벨업 기술(떠올리기 대체)을 보여 줄지
   // items: 추천 세팅에 쓸 도구 'all' 전부 · 'nochoice' 구애 도구 빼기 · 'none' 도구 없이
   game: { map: 'tour', rule: 'normal', battle: 'single', legends: false, relearn: true, items: 'all' },
   party: [],        // [{ id, ability, tera, picked, evo(진화 목표 id), mega(메가진화 폼 id · 0 안 함 · null 자동 추천), form(폼 변경 도구 폼), set(내 세팅) }]
@@ -95,7 +95,11 @@ export function toggleRelearn() {
   update(s => { s.game.relearn = s.game.relearn === false; });
   return store.game.relearn;
 }
-export const relearnToast = on => (on ? '기술 떠올리기 ON · 교배·가르침·기술머신 기술까지 추천·대체에 써요' : '기술 떠올리기 OFF · 레벨업 기술만으로 추천·대체해요');
+export const relearnToast = on => (on ? '떠올리기 대체 ON · 기술 칸·기술머신 기술을 못 구하면 기술 떠올리기로 대신 배울 레벨업 기술을 보여 줘요' : '떠올리기 대체 OFF · 대신 배울 기술을 숨겨요');
+
+// 기술 얻는 방법 (ui/builder.js 가 등록): { on, kind(mon, slug, lv) → { kind: 'level'|'later'|'tech', lv } | null, sub(mon, set, slug, lv) → 떠올리기 대체 기술 | null }
+let learnProvider = null;
+export const setLearnProvider = fn => { learnProvider = fn; };
 
 /** 추천 세팅에 쓸 도구 기준 (core/build.js ITEM_MODES) */
 export const itemMode = () => (ITEM_MODES.some(m => m.key === store.game.items) ? store.game.items : 'all');
@@ -105,10 +109,10 @@ export function setItemMode(mode) {
   return `추천 도구: ${m.name} · 최선 세팅·대체 도구를 다시 골랐어요`;
 }
 
-/** 추천 세팅 카드용 게임 정보. relearn: { on, of(mon) → 기술 떠올리기로만 배우는 기술 Set | null (기술 데이터 전) } */
+/** 추천 세팅 카드용 게임 정보. learn: 기술 얻는 방법 · 떠올리기 대체 (기술 데이터 전이면 null) */
 export const gameOpts = () => (isGameMode() ? {
   data: store.gameData, rule: gameRule(),
-  relearn: { on: store.game.relearn !== false, of: mon => getBuilder()?.relearnOnly(mon) || null },
+  learn: learnProvider?.() || null,
   items: { mode: itemMode(), usable: usableItems() },
 } : null);
 
@@ -174,11 +178,11 @@ let builderCache = null, builderKey = '';
 export function getBuilder() {
   if (!isGameMode() || !store.moves) return null;
   const ctx = getContext();
-  const key = `${ctxKey}|${store.game.battle}|${gameRule()?.key}|${!!store.sets}|${store.game.relearn !== false}|${itemMode()}`;
+  const key = `${ctxKey}|${store.game.battle}|${gameRule()?.key}|${!!store.sets}|${itemMode()}`;
   if (key !== builderKey || !builderCache) {
     builderCache = createBuilder(ctx, store.moves, {
       level: store.gameData.finalLevel, battle: store.game.battle, sets: store.sets, items: usableItems(),
-      relearn: store.game.relearn !== false, itemOk: itemOkFor,
+      itemOk: itemOkFor,
     });
     builderKey = key;
   }

@@ -254,18 +254,26 @@ function build({ dat, dex, sets, T }) {
   const levelTable = (block(lvSrc, 'LEVEL_TABLE').replace(/#.*$/gm, '').match(/\d+/g) || []).map(Number);
 
   // ── 기술 습득: 추천 세팅의 기술 중 게임에서 배울 수 없는 것 표시 ──
-  // 레벨업 기술은 레벨이 오르면 배우고(Board_Turn), 교배기술·가르침(기술머신) 기술은 기술 칸·학습장치의
-  // 「기술 떠올리기」로만 배운다 (Board_Skill_Tile: SKILL_TILE_MOVE_SCOPE = 2 → 레벨업 + 기술머신 + 가르침 + 교배 전부)
+  // 레벨업 기술은 레벨이 오르면 배우고(Board_Turn), 놓치거나 잊어도 「내 포켓몬 확인 → 기술 떠올리기」로 다시 배운다
+  //   (Ultimate Move Tutor pbGetRelearnableMoves, MOVETUTOR 변수 기본 0 → 자기 레벨업 기술 + 첫 진화 단계의 레벨업 기술, 지금 레벨 이하).
+  // 기술머신·가르침·교배 기술은 기술 칸·학습장치(SKILL_TILE_MOVE_SCOPE = 2 → 전부)·기술머신으로만 배운다.
+  // Lv.75 를 넘는 레벨업 기술은 마지막 레벨로 당겨 배운다 (Board_Move_Cap)
+  const finalLevel = levelTable[levelTable.length - 1] || 75;
   const learn = new Map();     // dex id → Set(move id) 전부
-  const lvLearn = new Map();   // dex id → Set(move id) 레벨업 기술만
+  const lvAt = new Map();      // dex id → Map(move id → 배우는 레벨) 레벨업 기술만
   for (const [k, g] of gameMon) {
     const s = g.data;
     const set = learn.get(g.dex.id) || new Set();
-    const lv = lvLearn.get(g.dex.id) || new Set();
-    for (const [, mv] of s.moves || []) { set.add(toId(String(mv))); lv.add(toId(String(mv))); }
+    const lv = lvAt.get(g.dex.id) || new Map();
+    for (const [level, mv] of s.moves || []) {
+      // 레벨 -1 = 기술 떠올리기 전용(9세대 규칙: 레벨업으로는 안 배우고 떠올리기로만) → 처음부터 떠올리기로 배울 수 있으니 0
+      const id = toId(String(mv)), l = Math.min(Math.max(+level || 0, 0), finalLevel);
+      set.add(id);
+      if (!lv.has(id) || l < lv.get(id)) lv.set(id, l);
+    }
     for (const mv of [...(s.tutor_moves || []), ...(s.egg_moves || [])]) set.add(toId(String(mv)));
     learn.set(g.dex.id, set);
-    lvLearn.set(g.dex.id, lv);
+    lvAt.set(g.dex.id, lv);
   }
   // 진화 전 단계의 기술(알 기술 등)도 물려받음
   const prevOf = new Map();
@@ -288,11 +296,23 @@ function build({ dat, dex, sets, T }) {
     return out;
   };
   const fullLearn = withPrevos(learn);
-  const levelLearn = withPrevos(lvLearn);
-  // 기술 떠올리기(기술 칸·학습장치)로만 배우는 기술 = 전부 − 레벨업 기술
-  const relearnOnly = id => {
-    const lv = levelLearn(id);
-    return new Set([...fullLearn(id)].filter(m => !lv.has(m)));
+  // 첫 진화 단계 (get_baby_species): 진화 전으로 끝까지
+  const babyOf = id => {
+    const seen = new Set([id]);
+    let cur = id;
+    for (;;) {
+      const prev = [...(prevOf.get(cur) || [])].find(p => !seen.has(p));
+      if (!prev) return cur;
+      seen.add(prev);
+      cur = prev;
+    }
+  };
+  // 기술 떠올리기로 다시 배울 수 있는 레벨업 기술 → 배우는 레벨 (자기 + 첫 진화 단계, 더 낮은 레벨)
+  const levelOf = id => {
+    const out = new Map(lvAt.get(id) || []);
+    const baby = babyOf(id);
+    if (baby !== id) for (const [m, l] of lvAt.get(baby) || []) if (!out.has(m) || l < out.get(m)) out.set(m, l);
+    return out;
   };
   const illegal = {};
   for (const id of Object.keys(pool).map(Number)) {
@@ -314,10 +334,10 @@ function build({ dat, dex, sets, T }) {
     moves: dat('moves.dat'), toId,
     slugOf: key => moveSlug.get(toId(key)) || toId(key),
     nameOf: (slug, en) => [msg[5].get(en), moveKoApi.get(slug)].find(s => s && hasHangul(s)) || en,
-    learnOf: fullLearn, relearnOf: relearnOnly, ids: [...new Set([...gameMon.values()].map(g => g.dex.id))],
+    learnOf: fullLearn, levelOf, ids: [...new Set([...gameMon.values()].map(g => g.dex.id))],
   });
   writeJson(join(DATA_DIR, 'game', 'moves.json'), moveData)
-    .then(size => console.log(`✔ game/moves.json · 기술 ${moveData.list.length}개 · 습득표 ${Object.keys(moveData.learn).length}종 (기술 떠올리기 전용 ${Object.values(moveData.learn).flat().filter(i => i < 0).length}개) · ${size}`));
+    .then(size => console.log(`✔ game/moves.json · 기술 ${moveData.list.length}개 · 습득표 ${Object.keys(moveData.learn).length}종 (레벨업 ${Object.values(moveData.learn).flat().filter(i => i >= 0).length} · 기술 칸·기술머신 ${Object.values(moveData.learn).flat().filter(i => i < 0).length}) · ${size}`));
 
   // ── 메가진화: 기본 폼 dex id → [[메가 폼 dex id, 메가스톤]] (게임 상점의 메가스톤 기준) ──
   const megas = {};
