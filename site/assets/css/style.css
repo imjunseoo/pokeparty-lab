@@ -911,3 +911,30 @@ button.type { border: 0; cursor: pointer; }
 .swap-opt.up b { color: var(--good); }
 .swap-opt.down b { color: var(--danger); }
 .swap-opt em { font-style: normal; font-size: 10.5px; color: var(--faint); }
+
+/* 메가진화 추천 */
+.mega-card { display: grid; gap: 10px; }
+.mega-card .card-head { margin-bottom: 0; }
+.mega-state { margin: 0; font-size: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mega-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.mega-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto auto; gap: 10px; align-items: center; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--border); font-size: 13px; }
+.mega-row.on { border-color: var(--accent); background: var(--accent-soft); }
+.mega-rank { font-weight: 800; color: var(--faint); text-align: center; }
+.mega-mon { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.mega-mon > span:last-child { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
+.mega-mon .note { flex-basis: 100%; }
+.mega-mon .sprite { width: 40px; height: 40px; margin: -6px -4px; }
+.mega-arrow { color: var(--faint); font-weight: 800; }
+.mega-stat { display: block; font-size: 12.5px; text-align: right; white-space: nowrap; }
+.mega-stat .bt-k { display: block; }
+.mega-stat em { font-style: normal; font-weight: 800; }
+.mega-stat .good { color: var(--good); } .mega-stat .bad { color: var(--danger); }
+.mega-on { font-size: 12px; font-weight: 800; color: var(--accent); padding: 4px 8px; }
+.mega-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.mega-actions:empty { display: none; }
+@media (max-width: 640px) {
+  .mega-row { grid-template-columns: 22px minmax(0, 1fr) auto; }
+  .mega-row .mega-stat { grid-column: 2; text-align: left; }
+  .mega-row > .btn, .mega-row > .mega-on { grid-column: 3; grid-row: 1; }
+}
+.mega-warn { display: block; font-size: 10.5px; font-weight: 800; color: var(--warn); }

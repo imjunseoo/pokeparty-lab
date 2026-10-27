@@ -22,7 +22,7 @@ export const store = {
   // relearn: 기술 떠올리기(기술 칸·학습장치의 교배·가르침·기술머신 기술)까지 추천·대체에 쓸지
   // items: 추천 세팅에 쓸 도구 'all' 전부 · 'nochoice' 구애 도구 빼기 · 'none' 도구 없이
   game: { map: 'tour', rule: 'normal', battle: 'single', legends: false, relearn: true, items: 'all' },
-  party: [],        // [{ id, ability, tera, picked, evo(진화 목표 id), mega(메가진화 폼 id), set(내 세팅) }]
+  party: [],        // [{ id, ability, tera, picked, evo(진화 목표 id), mega(메가진화 폼 id · 0 안 함 · null 자동 추천), set(내 세팅) }]
   opponents: [],    // 선봉 추천용 상대 파티 [id]
   wild: [],         // 포획 추천: 야생 칸에서 나온 후보 [id] (최대 3)
   ball: 'poke',     // 포획 추천: 지금 쓰는 볼 (라운드에 따라 바뀜)
@@ -186,7 +186,7 @@ export function getBuilder() {
 }
 
 /** 내 세팅의 공격 기술 타입 (기술 데이터가 없거나 공격 기술이 없으면 null → 자속 타입으로 분석) */
-function attackTypes(set) {
+export function attackTypes(set) {
   if (!set?.mv?.length || !store.moves) return null;
   const types = [...new Set(set.mv.map(s => store.moves.bySlug.get(s)).filter(mv => mv && mv.cat > 0).map(mv => mv.type))];
   return types.length ? types : null;
@@ -230,16 +230,29 @@ export const evoOptions = mon => finalsOf(store.engine, store.gameData, mon)
 /** 지금 게임 룰에서 쓸 수 있는 메가진화 [[메가 폼 id, 메가스톤]] (게임 모드 + 메가 룰일 때만) */
 export const megaOptions = mon => (isGameMode() && gameRule()?.uses.includes('mega') ? store.gameData.megas[mon.id] || [] : []);
 
-/** 파티 멤버가 실제로 싸우는 모습: 최종 진화(evolve) → 메가진화. { mon, caught, stone } */
-export function battleForm(m, { evolve = true } = {}) {
+/**
+ * 파티 멤버가 실제로 싸우는 모습: 최종 진화(evolve) → 메가진화. { mon, caught, stone, autoMega }
+ * m.mega: 메가 폼 id = 직접 고름 · 0 = 메가진화 안 함 · null = 정하지 않음 → auto(자동 추천 { id })가 있으면 그것
+ */
+export function battleForm(m, { evolve = true, auto = null } = {}) {
   const caught = store.engine.byId.get(m.id);
   let mon = caught;
   if (evolve) {
     const finals = evoOptions(caught);
     mon = (finals.find(f => f.mon.id === m.evo) || finals[0])?.mon || caught;
   }
-  const mega = megaOptions(mon).find(([id]) => id === m.mega);
-  return mega ? { mon: store.engine.byId.get(mega[0]), caught, stone: mega[1] } : { mon, caught, stone: null };
+  const want = m.mega > 0 ? m.mega : m.mega === 0 ? null : auto?.id ?? null;
+  const mega = megaOptions(mon).find(([id]) => id === want);
+  return mega ? { mon: store.engine.byId.get(mega[0]), caught, stone: mega[1], autoMega: !(m.mega > 0) } : { mon, caught, stone: null, autoMega: false };
+}
+
+// 메가진화 자동 추천 (ui/mega.js 가 등록): 직접 고른 메가진화가 없을 때 { i, id } | null
+let megaResolver = null, resolving = false;
+export const setMegaResolver = fn => { megaResolver = fn; };
+function megaAuto() {
+  if (!megaResolver || resolving || !isGameMode() || !gameRule()?.uses.includes('mega')) return null;
+  resolving = true;
+  try { return megaResolver(); } finally { resolving = false; }
 }
 
 /** 야생 후보(잡는 모습) → 비교할 모습들: 최종 진화(갈래마다) + 메가진화 룰이면 메가진화 모습 */
@@ -261,12 +274,15 @@ export function catchForms(ctx, mon) {
  * 저장된 파티 → 분석용 멤버 (진화 전 포켓몬은 최종 진화 기준, 메가진화를 켜면 메가 모습).
  * evolve: false 면 지금 모습 그대로 (선봉 추천처럼 당장의 배틀)
  */
-export function partyMembers(ctx = getContext(), { evolve = true } = {}) {
+// auto: 메가진화를 직접 고르지 않았으면 자동 추천 메가진화를 가정 (메가진화 추천을 계산할 때만 false)
+export function partyMembers(ctx = getContext(), { evolve = true, auto = true } = {}) {
   const { engine } = store;
-  return store.party.map(m => {
-    const { mon, caught, stone } = battleForm(m, { evolve });
+  const pick = auto ? megaAuto() : null;
+  return store.party.map((m, i) => {
+    const { mon, caught, stone, autoMega } = battleForm(m, { evolve, auto: pick?.i === i ? pick : null });
     const ability = engine.abilitiesOf(mon).includes(m.ability) ? m.ability : undefined;
-    return ctx.prep(mon, { ability, tera: m.tera || null, base: caught, stone, atk: attackTypes(m.set) });
+    const pm = ctx.prep(mon, { ability, tera: m.tera || null, base: caught, stone, atk: attackTypes(m.set) });
+    return autoMega ? { ...pm, autoMega } : pm;
   });
 }
 
@@ -303,7 +319,7 @@ function sanitizeParty(list) {
       tera: dex.typeNames[m.tera] ? m.tera : null,
       picked: !!m.picked,
       evo,
-      mega: megas.some(([id]) => id === +m.mega) ? +m.mega : null,
+      mega: m.mega === 0 ? 0 : megas.some(([id]) => id === +m.mega) ? +m.mega : null,   // 0 = 메가진화 안 함
       set: sanitizeSet(m.set),
     });
   }

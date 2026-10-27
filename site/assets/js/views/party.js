@@ -3,7 +3,7 @@
 // 예시를 고르면 바로 다음 추천을 다시 계산한다.
 import {
   store, update, getContext, partyMembers, addToParty, encodeParty, usageInfo,
-  isGameMode, gameRule, battleMode, whereToFind, setsOrder, gameOpts, evoOptions, megaOptions, loadMoves, sanitizeSet, toggleRelearn, relearnToast, setItemMode,
+  isGameMode, gameRule, battleMode, whereToFind, setsOrder, gameOpts, evoOptions, megaOptions, battleForm, loadMoves, sanitizeSet, toggleRelearn, relearnToast, setItemMode,
 } from '../state.js';
 import { createPicker } from '../ui/picker.js';
 import { esc, on, toast, copyText, josa } from '../ui/dom.js';
@@ -15,13 +15,14 @@ import { orderedSets, setCard } from '../ui/sets.js';
 import { reasonChip, commentText, itemName, addPlan, catchHint } from '../ui/reasons.js';
 import { buildCard, readEditor, fillEditor, analyzeMember, pickSet, pickedSet, selectedTarget } from '../ui/builder.js';
 import { bindSearchSelects } from '../ui/searchselect.js';
+import { megaPlan, FIT_WARN } from '../ui/mega.js';
 import { describeSet, refSource } from '../ui/setdesc.js';
 
 // 사용자가 처음 보여준 예시 파티 (Gemini 예시 코드의 파티 구성)
 const EXAMPLE = ['delphox', 'luxray', 'iron-crown', 'quagsire', 'sableye', 'vivillon'];
 const LEVEL_LABEL = { danger: '위험', warn: '주의', good: '좋음', info: '참고' };
 
-let root, slotsEl, recEl, analysisEl, optionsEl;
+let root, slotsEl, recEl, analysisEl, optionsEl, megaEl;
 let optionsOpen = null;   // null = 모드 기본값 (게임 모드는 펼침)
 let deepOpen = false;
 let editing = null;       // 내 세팅 입력 폼을 연 멤버 번호
@@ -47,12 +48,14 @@ export function initParty(el) {
     </div>
     <details class="options" id="p-options"></details>
     <div class="slots" id="p-slots"></div>
+    <section class="card mega-card" id="p-mega" hidden></section>
     <section class="card rec-card" id="p-rec"></section>
     <div id="p-analysis" class="view"></div>`;
   slotsEl = root.querySelector('#p-slots');
   recEl = root.querySelector('#p-rec');
   analysisEl = root.querySelector('#p-analysis');
   optionsEl = root.querySelector('#p-options');
+  megaEl = root.querySelector('#p-mega');
 
   createPicker(root.querySelector('#p-picker'), {
     engine: store.engine, search: store.search,
@@ -98,7 +101,25 @@ export function initParty(el) {
   on(root, 'change', '[data-field]', (e, el) => {
     const i = +el.dataset.i, field = el.dataset.field;
     const numeric = field === 'evo' || field === 'mega';
-    update(s => { s.party[i][field] = el.value ? (numeric ? +el.value : el.value) : null; });
+    // 메가진화: '' 자동 추천(null) · '0' 안 함(0) · 폼 id. 파티에 하나만이라 직접 고르면 다른 멤버의 직접 고른 메가진화는 자동으로
+    update(s => {
+      s.party[i][field] = el.value ? (numeric ? +el.value : el.value) : null;
+      if (field === 'mega' && s.party[i].mega > 0) s.party.forEach((m, j) => { if (j !== i && m.mega > 0) m.mega = null; });
+    });
+  });
+  // 메가진화 추천 카드
+  on(root, 'click', '[data-mega-pick]', (e, el) => {
+    const [i, id] = el.dataset.megaPick.split(':').map(Number);
+    update(s => s.party.forEach((m, j) => { if (j === i) m.mega = id; else if (m.mega > 0) m.mega = null; }));
+    toast(`${store.engine.byId.get(id)?.ko || '메가진화'} 기준으로 파티와 세팅을 다시 계산했어요`);
+  });
+  on(root, 'click', '[data-act="mega-auto"]', () => {
+    update(s => s.party.forEach(m => { m.mega = null; }));
+    toast('메가진화를 자동 추천으로 맡겼어요 · 평균 승률이 가장 많이 오르는 멤버');
+  });
+  on(root, 'click', '[data-act="mega-none"]', () => {
+    update(s => s.party.forEach(m => { m.mega = 0; }));
+    toast('메가진화 없이 계산해요');
   });
   on(root, 'change', '[data-filter]', (e, el) => {
     const key = el.dataset.filter;
@@ -177,6 +198,7 @@ export function renderParty() {
   const members = partyMembers(ctx);
   renderOptions(ctx);
   renderSlots(ctx, members);
+  renderMega();
   renderRec(ctx, members);
   renderAnalysis(ctx, members);
   if (scrollToEditor && editing !== null) {
@@ -244,7 +266,7 @@ function renderSlots(ctx, members) {
     const reasons = m.picked ? explainSlot(ctx, members, i).filter(r => r.kind !== 'usage') : [];
     const where = isGameMode() ? whereToFind(caught) : '';
     const evoNote = mon.id !== caught.id
-      ? `<div class="slot-evo">→ <b>${esc(mon.ko)}</b> 기준으로 분석${pm.stone ? ` · ${esc(itemName(pm.stone))}` : ''}</div>` : '';
+      ? `<div class="slot-evo">→ <b>${esc(mon.ko)}</b> 기준으로 분석${pm.stone ? ` · ${esc(itemName(pm.stone))}` : ''}${pm.autoMega ? ' <span class="pill-soft accent" title="평균 승률이 가장 많이 오르는 메가진화 (메가진화 칸에서 바꿀 수 있어요)">자동 추천</span>' : ''}</div>` : '';
     html.push(`
       <div class="slot ${m.picked ? 'picked' : ''}">
         <div class="slot-top">
@@ -263,7 +285,8 @@ function renderSlots(ctx, members) {
             ${finals.map(f => `<option value="${f.mon.id}" ${f.mon.id === evolved.id ? 'selected' : ''}>${esc(f.mon.ko)}${f.item ? ` (${esc(itemName(f.item))})` : ''}</option>`).join('')}
           </select></label>` : ''}
           ${megas.length ? `<label>메가진화<select class="select" data-field="mega" data-i="${i}">
-            <option value="">안 함</option>
+            <option value="" ${m.mega == null ? 'selected' : ''}>자동 추천${m.mega == null ? (pm.autoMega ? ` (${esc(mon.ko)})` : ' (안 함)') : ''}</option>
+            <option value="0" ${m.mega === 0 ? 'selected' : ''}>안 함</option>
             ${megas.map(([id, stone]) => `<option value="${id}" ${id === m.mega ? 'selected' : ''}>${esc(engine.byId.get(id)?.ko || '')} · ${esc(itemName(stone))}</option>`).join('')}
           </select></label>` : ''}
           <label>특성<select class="select" data-field="ability" data-i="${i}" ${abilities.length < 2 ? 'disabled' : ''}>
@@ -334,6 +357,43 @@ function fullPartyCard(ctx, members, scope) {
     </div>
     <h4 class="swap-title">교체 추천 <span class="note">한 마리만 바꿨을 때 파티 점수가 가장 많이 오르는 조합 · 누르면 바꿔 봐요</span></h4>
     ${swapHtml ? `<div class="swap-list">${swapHtml}</div>` : '<p class="note">이 맵에서 잡을 수 있는 포켓몬 중에는 바꿔서 더 좋아지는 조합이 없어요. 아래 멤버별 세팅을 다듬어 보세요.</p>'}`;
+}
+
+/** 메가진화 추천: 누구를 메가진화할지 (파티에 하나만) · 평균 승률 · 파티 상성 */
+function renderMega() {
+  const plan = megaPlan();
+  megaEl.hidden = !plan;
+  if (!plan) { megaEl.innerHTML = ''; return; }
+  const { engine } = store;
+  const pct = v => `${Math.round(v * 100)}%`;
+  const price = slug => store.gameData.itemInfo?.[slug]?.[1];
+  const cur = plan.pick;
+  const none = store.party.every(m => m.mega === 0 || !megaOptions(battleForm({ ...m, mega: 0 }).mon).length);
+  const state = cur
+    ? `<b>${esc(cur.mon.ko)}</b> 기준으로 분석하고 있어요 ${plan.explicit !== null ? '<span class="pill-soft">직접 고름</span>' : '<span class="pill-soft accent">자동 추천</span>'}`
+    : none ? '메가진화 없이 분석하고 있어요' : '메가진화해도 평균 승률이 오르는 멤버가 없어서, 메가진화 없이 분석하고 있어요';
+  const rows = plan.options.map((o, k) => {
+    const on = cur && cur.i === o.i && cur.id === o.id;
+    const base = store.party[o.i] && engine.byId.get(store.party[o.i].id);
+    const p = price(o.stone);
+    return `<li class="mega-row ${on ? 'on' : ''}">
+      <span class="mega-rank">${k + 1}</span>
+      <span class="mega-mon">${sprite(o.base)}<span class="mega-arrow">→</span>${sprite(o.mon)}<span><b>${esc(o.mon.ko)}</b>${typeList(engine, o.mon.t, 'sm')}
+        <span class="note">${esc(itemName(o.stone))}${p ? ` · 기믹 상점 ${p.toLocaleString()}원` : ''}${base && base.id !== o.base.id ? ` · ${esc(base.ko)}에서 진화 후` : ''}</span></span></span>
+      ${o.rate0 !== null ? `<span class="mega-stat" title="이 맵 상대 후보와 1:1로 붙었을 때 먼저 쓰러뜨리는 비율 (메가진화 전 → 후)"><span class="bt-k">평균 승률</span>${pct(o.rate0)} → <b>${pct(o.rate1)}</b> <em class="${o.gain >= 0 ? 'good' : 'bad'}">${o.gain >= 0 ? '+' : '−'}${Math.round(Math.abs(o.gain) * 100)}%p</em></span>` : ''}
+      <span class="mega-stat" title="파티 상성 점수 변화 (약점 겹침·공격 범위·종족값)"><span class="bt-k">파티 상성</span><em class="${o.fit >= 0 ? 'good' : 'bad'}">${o.fit >= 0 ? '+' : '−'}${Math.abs(o.fit).toFixed(1)}</em>${o.fit <= FIT_WARN ? `<small class="mega-warn" title="${esc(o.mon.ko)}의 타입이 다른 멤버와 약점이 겹쳐요">약점 겹침</small>` : ''}</span>
+      ${on ? '<span class="mega-on">적용 중</span>' : `<button type="button" class="btn sm" data-mega-pick="${o.i}:${o.id}">이걸로</button>`}
+    </li>`;
+  }).join('');
+  megaEl.innerHTML = `<div class="card-head"><h3>${ICONS.spark} 메가진화 추천</h3><span class="sub">${esc(gameRule().name)} · 파티에 하나만</span></div>
+    <p class="mega-state">${state}</p>
+    <ol class="mega-list">${rows}</ol>
+    <div class="mega-actions">
+      ${plan.explicit !== null || none ? '<button type="button" class="btn sm ghost" data-act="mega-auto">자동 추천으로</button>' : ''}
+      ${!none ? '<button type="button" class="btn sm ghost" data-act="mega-none">메가진화 안 함</button>' : ''}
+    </div>
+    <p class="note">${plan.rated ? '평균 승률 = 이 맵 상대 후보와 1:1로 붙었을 때 먼저 쓰러뜨리는 비율 (내 세팅을 입력했으면 그 기술, 아니면 모습마다 최선 세팅 · 기본 개체값). 직접 고르지 않으면 가장 많이 오르는 멤버를 자동으로 골라요.' : '기술 데이터를 불러오면 평균 승률로 다시 골라요 (지금은 파티 상성 기준).'}
+      메가진화한 멤버는 아래 멤버 카드에서 <b>메가진화 모습 기준 최선 세팅(메가스톤 고정)</b>과 추천 세팅을 보여 줘요.</p>`;
 }
 
 function renderRec(ctx, members) {

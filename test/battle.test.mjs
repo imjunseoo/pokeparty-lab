@@ -56,3 +56,20 @@ test('상대 타입별 대응: 18타입 · 멤버마다 공격·받기 · 운용
   assert.ok(g.immune.includes('electric'));
   assert.ok(g.jobs.length === 4 && Math.abs(g.jobs.reduce((a, j) => a + j.share, 0) - 1) < 0.05, '주력 비율 합 ≈ 1');
 });
+
+test('메가진화 추천 재료: 평균 승률(1:1 먼저 쓰러뜨리는 비율)과 메가진화 모습으로 바꿨을 때 파티 상성 변화', async () => {
+  const { winRate } = await import('../site/assets/js/core/battle.js');
+  const { formSwapGain } = await import('../site/assets/js/core/party.js');
+  const zard = mon('charizard'), megaX = engine.byId.get(data.megas[zard.id].find(([, s]) => s === 'charizardite-x')[0]);
+  const set0 = b.optimize(zard, set('charizard', []));
+  const set1 = b.optimize(megaX, set('charizard', [], { ab: megaX.ab[0] }), { fixedItem: 'charizardite-x' });
+  const r0 = winRate(ctx, b.targetTable(zard, set0)), r1 = winRate(ctx, b.targetTable(megaX, set1));
+  assert.ok(r0 > 0 && r0 < 1 && r1 > 0 && r1 <= 1);
+  assert.ok(r1 > r0, '메가리자몽X 가 리자몽보다 평균 승률이 높다');
+  // 한카리아스와 함께면 메가리자몽X(드래곤)는 약점이 겹쳐 파티 상성이 내려가고, 메가리자몽Y(불꽃·비행)는 그렇지 않다
+  const members = ['garchomp', 'charizard', 'blastoise'].map(s => ctx.prep(mon(s)));
+  const megaY = engine.byId.get(data.megas[zard.id].find(([, s]) => s === 'charizardite-y')[0]);
+  const fitX = formSwapGain(ctx, members, 1, ctx.prep(megaX, { stone: 'charizardite-x' }));
+  const fitY = formSwapGain(ctx, members, 1, ctx.prep(megaY, { stone: 'charizardite-y' }));
+  assert.ok(fitY > fitX);
+});

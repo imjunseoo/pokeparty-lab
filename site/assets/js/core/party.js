@@ -224,6 +224,12 @@ function allowed(st, c) {
   return !st.species.has(c.sp) && !(c.mega && st.megas >= 1);
 }
 
+/** i 번째 멤버를 다른 모습 c(메가진화 등)로 바꿨을 때 파티 점수 변화 */
+export function formSwapGain(ctx, members, i, c) {
+  const rest = stateOf(ctx, members.filter((_, j) => j !== i));
+  return scoreWith(ctx, rest, c) - totalScore(ctx, stateOf(ctx, members));
+}
+
 /**
  * 빈 슬롯 자동 추천.
  * @param members  prep 된 현재 파티 (locked 가 true 인 것만 유지)

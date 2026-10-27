@@ -36,6 +36,19 @@ export function duelRank(b, rows, foe, foeSet) {
 }
 
 /**
+ * 평균 승률: 이 맵 상대 후보 하나하나와 1:1 로 붙었을 때 먼저 쓰러뜨리는 비율 (출현 가중치, 상대는 자속 위력 90)
+ * table: builder.targetTable(...) — 내가 빠르면 내 타수 ≤ 상대 타수, 느리면 < 이면 이김
+ */
+export function winRate(ctx, table) {
+  let win = 0;
+  ctx.meta.forEach((m, q) => {
+    const mine = hitsToKo(table.best[q]), theirs = hitsToKo(table.taken[q]);
+    if (mine < Infinity && (table.faster[q] ? mine <= theirs : mine < theirs)) win += m.w;
+  });
+  return win / ctx.metaW;
+}
+
+/**
  * 상대 타입별 대응: 이 맵 상대 후보 중 그 타입을 가진 포켓몬들에게 (가중 평균)
  * 공격 = 내 기술 중 가장 센 데미지 %, 받기 = 상대 자속 공격에 받는 %, 선공 비율
  * tables: [{ i, t: builder.targetTable(...) }]
