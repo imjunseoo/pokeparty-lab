@@ -440,6 +440,26 @@ function build({ dat, dex, sets, T }) {
     }
   }
 
+  // ── 거다이맥스 (다이맥스 룰, 다이스프를 먹이면 거다이맥스 가능): 기본 폼 dex id → { move, ko, type, fn, power }
+  //   거다이맥스 폼(PBS form 이름 Gigantamax)의 gmax_move, 원래 폼은 ungmax_form
+  const gameMoves = dat('moves.dat');
+  const moveBySym = new Map([...gameMoves].map(([k, v]) => [String(k), v]));
+  const gmax = {};
+  for (const [, g] of gameMon) {
+    const s = g.data;
+    if (!s.gmax_move || !/Gigantamax/i.test(String(s.real_form_name))) continue;
+    const sp = String(s.species), un = +s.ungmax_form || 0;
+    const baseKey = un ? `${sp}_${un}` : sp;
+    const base = gameMon.get(baseKey)?.dex || defaultOf.get(sp);
+    const mv = moveBySym.get(String(s.gmax_move));
+    if (!base || !mv || gmax[base.id]) continue;
+    const slug = moveSlug.get(toId(String(s.gmax_move))) || toId(String(s.gmax_move));
+    gmax[base.id] = {
+      move: slug, ko: [msg[5].get(String(mv.real_name)), moveKoApi.get(slug)].find(x => x && hasHangul(x)) || String(mv.real_name),
+      type: String(mv.type).toLowerCase(), fn: String(mv.function_code), power: mv.power || 0,
+    };
+  }
+
   // ── 야생 포획 등급 (보드 사파리): 원래 포획률 120↑ 흔함(0) · 45↑ 보통(1) · 그 밖 희귀(2) → 한 번 던질 때 65 / 50 / 35% ──
   const catchTier = {};
   for (const [, g] of gameMon) {
@@ -468,7 +488,10 @@ function build({ dat, dex, sets, T }) {
     tourneyShopCount,
     signatureUsers,
     formItems,
+    gmax,
     signaturePrice: priceOf('SIGNATURE_ITEM_PRICE'),
+    // 기믹 상점 가격 (테라피스·마스터테라주얼·다이버섯·다이스프)
+    gimmickPrices: Object.fromEntries([...block(shopSrc, 'GIMMICK_ITEM_PRICES', '{').matchAll(/(\w+):\s*(\d+)/g)].map(m => [item(m[1]), +m[2]])),
     evoItemPrice,
     maps,
     starters,

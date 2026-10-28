@@ -13,7 +13,8 @@ import { ITEM_MODES } from '../core/build.js';
 import { analyze, recommend, recommendTypes, explainSlot, explainCandidate, memberValues, alternativesFor, bestSwaps } from '../core/party.js';
 import { orderedSets, setCard } from '../ui/sets.js';
 import { reasonChip, commentText, itemName, addPlan, catchHint } from '../ui/reasons.js';
-import { buildCard, readEditor, fillEditor, analyzeMember, pickSet, pickedSet, selectedTarget } from '../ui/builder.js';
+import { buildCard, readEditor, fillEditor, analyzeMember, pickSet, pickedSet, selectedTarget, refOpen } from '../ui/builder.js';
+import { teraCard, dynamaxCard } from '../ui/gimmick.js';
 import { bindSearchSelects } from '../ui/searchselect.js';
 import { megaPlan, FIT_WARN } from '../ui/mega.js';
 import { describeSet, refSource } from '../ui/setdesc.js';
@@ -22,7 +23,7 @@ import { describeSet, refSource } from '../ui/setdesc.js';
 const EXAMPLE = ['delphox', 'luxray', 'iron-crown', 'quagsire', 'sableye', 'vivillon'];
 const LEVEL_LABEL = { danger: '위험', warn: '주의', good: '좋음', info: '참고' };
 
-let root, slotsEl, recEl, analysisEl, optionsEl, megaEl;
+let root, slotsEl, recEl, analysisEl, optionsEl, megaEl, teraEl, dynaEl;
 let optionsOpen = null;   // null = 모드 기본값 (게임 모드는 펼침)
 let deepOpen = false;
 let editing = null;       // 내 세팅 입력 폼을 연 멤버 번호
@@ -49,6 +50,8 @@ export function initParty(el) {
     <details class="options" id="p-options"></details>
     <div class="slots" id="p-slots"></div>
     <section class="card mega-card" id="p-mega" hidden></section>
+    <section class="card mega-card gimmick-card" id="p-tera" hidden></section>
+    <section class="card mega-card gimmick-card" id="p-dyna" hidden></section>
     <section class="card rec-card" id="p-rec"></section>
     <div id="p-analysis" class="view"></div>`;
   slotsEl = root.querySelector('#p-slots');
@@ -56,6 +59,8 @@ export function initParty(el) {
   analysisEl = root.querySelector('#p-analysis');
   optionsEl = root.querySelector('#p-options');
   megaEl = root.querySelector('#p-mega');
+  teraEl = root.querySelector('#p-tera');
+  dynaEl = root.querySelector('#p-dyna');
 
   createPicker(root.querySelector('#p-picker'), {
     engine: store.engine, search: store.search,
@@ -148,12 +153,18 @@ export function initParty(el) {
   });
   on(root, 'click', '[data-act="relearn-toggle"]', () => toast(relearnToast(toggleRelearn())));
   on(root, 'click', '[data-act="item-mode"]', (e, el) => toast(setItemMode(el.dataset.mode)));
-  // 멤버 카드의 세팅 버튼 (최선 ↔ 참고 추천 세팅)
+  // 멤버 카드의 실전 세팅 참고: 펼쳐 볼 세팅 고르기 · 펼침 상태 기억 (다시 그려도 유지)
   on(root, 'click', '[data-pick-set]', (e, el) => {
     const [i, key] = el.dataset.pickSet.split(':');
     pickSet(+i, key);
+    refOpen.add(+i);
     renderParty();
   });
+  root.addEventListener('toggle', e => {
+    if (!e.target.matches?.('.ref-sets')) return;
+    const i = +e.target.dataset.ref;
+    if (e.target.open) refOpen.add(i); else refOpen.delete(i);
+  }, true);
   bindSearchSelects(root);
   root.addEventListener('submit', e => {
     const form = e.target.closest('.set-editor');
@@ -199,6 +210,7 @@ export function renderParty() {
   renderOptions(ctx);
   renderSlots(ctx, members);
   renderMega();
+  renderGimmicks(ctx, members);
   renderRec(ctx, members);
   renderAnalysis(ctx, members);
   if (scrollToEditor && editing !== null) {
@@ -362,6 +374,14 @@ function fullPartyCard(ctx, members, scope) {
     </div>
     <h4 class="swap-title">교체 추천 <span class="note">한 마리만 바꿨을 때 파티 점수가 가장 많이 오르는 조합 · 누르면 바꿔 봐요</span></h4>
     ${swapHtml ? `<div class="swap-list">${swapHtml}</div>` : '<p class="note">이 맵에서 잡을 수 있는 포켓몬 중에는 바꿔서 더 좋아지는 조합이 없어요. 아래 멤버별 세팅을 다듬어 보세요.</p>'}`;
+}
+
+/** 테라스탈·다이맥스 활용 (그 기믹을 쓰는 룰일 때) */
+function renderGimmicks(ctx, members) {
+  const tera = isGameMode() ? teraCard(ctx, members) : '';
+  const dyna = isGameMode() && store.moves ? dynamaxCard(ctx, members) : '';
+  teraEl.hidden = !tera; teraEl.innerHTML = tera;
+  dynaEl.hidden = !dyna; dynaEl.innerHTML = dyna;
 }
 
 /** 메가진화 추천: 누구를 메가진화할지 (파티에 하나만) · 평균 승률 · 파티 상성 */

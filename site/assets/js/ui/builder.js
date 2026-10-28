@@ -1,7 +1,8 @@
-// 내 세팅 입력 · 게임 최선 세팅 · 참고 세팅 고르기 · 목표까지 할 일 (파티 추천 화면의 멤버 카드, 「포켓몬 파티!」 모드)
-import { store, getBuilder, gameRule, allowedItems, usableItems, itemMode, itemOkFor, setsOrder, setLearnProvider } from '../state.js';
+// 내 세팅 입력 · 게임 추천 세팅(내 파티 약점 보충 · 승리 플랜) · 실전 세팅 참고 · 목표까지 할 일 (파티 추천 화면의 멤버 카드, 「포켓몬 파티!」 모드)
+import { store, getBuilder, getContext, partyMembers, evoOptions, gameRule, allowedItems, usableItems, itemMode, itemOkFor, setsOrder, setLearnProvider } from '../state.js';
+import { partyNeed } from '../core/party.js';
 import { esc, josa } from './dom.js';
-import { sprite } from './components.js';
+import { sprite, typeBadge } from './components.js';
 import { NATURES, TYPE_ITEMS, MODELED_ITEMS } from '../core/build.js';
 import { STAT_LABELS } from '../core/engine.js';
 import { itemName, itemSource, itemPartyWarning } from './reasons.js';
@@ -13,10 +14,48 @@ const CLS = ['변화', '물리', '특수'];
 const NO_IV = [false, false, false, false, false, false];
 const results = new WeakMap();   // 평가기 → Map(멤버 세팅 키 → 계산 결과)
 
-// 멤버 카드마다 고른 세팅 (멤버 번호 → 'best' | 추천 세팅 키 B·S·D·R·A). 저장하지 않음
+// 멤버 카드마다 펼쳐 본 실전 세팅 (멤버 번호 → 추천 세팅 키 B·S·D·R·A) · 실전 세팅 참고를 펼친 멤버. 저장하지 않음
 const picked = new Map();
 export const pickSet = (i, key) => picked.set(i, key);
 export const pickedSet = i => picked.get(i);
+export const refOpen = new Set();
+
+// 내 파티가 약한 상대 가중치 (멤버 m 의 팀원 기준, 파티 밖 포켓몬이면 파티 전체 기준) — 분석 컨텍스트 · 파티가 같으면 다시 계산하지 않음
+const needs = new WeakMap();
+const partyKey = () => JSON.stringify(store.party.map(x => [x.id, x.evo, x.mega, x.form, x.ability, x.tera, x.set?.mv]));
+export function needFor(m) {
+  const ctx = getContext();
+  let map = needs.get(ctx);
+  if (!map) needs.set(ctx, (map = new Map()));
+  const i = m ? store.party.indexOf(m) : -1;
+  const key = `${i}|${partyKey()}`;
+  if (!map.has(key)) map.set(key, store.party.length ? partyNeed(ctx, partyMembers(ctx), i) : null);
+  return { need: map.get(key), key };
+}
+
+/** 기술 칸·기술머신으로 구하면 추천 세팅에서 바꿀 기술 (감점 없이 쟀을 때 오르는 점수, 큰 순) */
+function techUpgrades(b, mon, set, need, lv, limit = 2) {
+  const lvs = b.learnLevels(mon);
+  const base = b.evaluate(mon, set, { need }).score;
+  const out = [];
+  for (const mv of b.learnable(mon)) {
+    if (set.mv.includes(mv.slug) || (lvs.has(mv.slug) && lvs.get(mv.slug) <= lv)) continue;
+    let bestSwap = null;
+    set.mv.forEach((old, k) => {
+      const next = set.mv.slice(); next[k] = mv.slug;
+      const gain = b.evaluate(mon, { ...set, mv: next }, { need }).score - base;
+      if (!bestSwap || gain > bestSwap.gain) bestSwap = { learn: mv.slug, forget: old, gain };
+    });
+    if (set.mv.length < 4) {
+      const gain = b.evaluate(mon, { ...set, mv: [...set.mv, mv.slug] }, { need }).score - base;
+      if (!bestSwap || gain > bestSwap.gain) bestSwap = { learn: mv.slug, forget: null, gain };
+    }
+    if (bestSwap && bestSwap.gain > 1) out.push(bestSwap);
+  }
+  // 같은 기술을 잊는 것끼리는 이득이 큰 것 하나만
+  const seen = new Set();
+  return out.sort((a, b2) => b2.gain - a.gain).filter(x => !seen.has(x.forget) && seen.add(x.forget)).slice(0, limit);
+}
 
 /** 멤버의 지금 세팅 (입력이 없으면 빈 세팅: 기술 없음·무보정·개체값 20) */
 export function currentSet(m, pm) {
@@ -26,23 +65,31 @@ export function currentSet(m, pm) {
   };
 }
 
-/** 최선 세팅 · 평가 · 할 일 (같은 입력이면 다시 계산하지 않음) */
+/**
+ * 게임 추천 세팅 · 평가 · 할 일 (같은 입력이면 다시 계산하지 않음)
+ * 추천 세팅 = 도구 없이(정해진 도구만) · 지금 개체값·성격·특성으로 기술만, 내 파티가 약한 상대를 더 무겁게(need) · 구하기 어려운 기술 감점
+ * opts: 하면 좋은 선택(성격·특성·도구·개체값), win: 승리 플랜, upgrades: 기술 칸에서 구하면 바꿀 기술
+ */
 export function analyzeMember(m, pm) {
   const b = getBuilder();
   if (!b) return null;
   const cur = currentSet(m, pm);
-  const key = `${pm.mon.id}|${pm.stone || ''}|${JSON.stringify(cur)}`;
+  const { need, key: nk } = needFor(m);
+  const key = `${pm.mon.id}|${pm.mon.form || ''}|${pm.stone || ''}|${JSON.stringify(cur)}|${nk}`;
   let map = results.get(b);
   if (!map) results.set(b, (map = new Map()));
-  if (!map.has(key)) {
-    const abilities = store.engine.abilitiesOf(pm.mon);
-    const best = b.optimize(pm.mon, cur, { abilities, fixedItem: pm.stone || null });
-    map.set(key, {
-      cur, best, now: m.set ? b.evaluate(pm.mon, cur) : null, top: b.evaluate(pm.mon, best),
-      steps: m.set ? b.plan(pm.mon, cur, best) : [],
-    });
-  }
+  if (!map.has(key)) map.set(key, recommendFor(b, pm.mon, cur, { need, stone: pm.stone || null, known: !!m.set }));
   return map.get(key);
+}
+
+function recommendFor(b, mon, cur, { need = null, stone = null, known = false } = {}) {
+  const best = b.recommend(mon, cur, { fixedItem: stone, need });
+  const steps = b.plan(mon, cur, best, { need, fixedItem: stone });
+  return {
+    cur, best, need, now: known ? b.evaluate(mon, cur) : null, top: b.evaluate(mon, best),
+    steps: known ? steps : [], opts: steps.filter(s => s.optional),
+    win: b.winPlan(mon, best, { need }), upgrades: techUpgrades(b, mon, best, need, cur.lv || b.level),
+  };
 }
 
 const line = (label, vals) => (vals ? `<div class="set-line"><span>${label}</span><span class="vals">${vals}</span></div>` : '');
@@ -69,9 +116,10 @@ const ivText = iv => {
  * re: { kind(slug), sub(slug), on } → 얻는 방법(레벨업 · Lv.N · 기술 칸) + 떠올리기 대체 ON/OFF 버튼 · 도구 기준 버튼 (목표 세팅에만)
  * alt: 목표 도구를 못 구했을 때 대신 지닐 도구 [{ it, diff }] (builder.itemAlternatives)
  */
-function setLines(set, ab, { rows = null, itemSub = null, re = null, alt = null } = {}) {
-  const struck = (text, why) => `<span class="na" title="${why}">${esc(text)}</span>`;
-  // 기술 칸 기술 옆에 떠올리기 대체 (ON 일 때, 이미 대체로 쓴 기술은 다음 대체에서 뺌)
+const struck = (text, why) => `<span class="na" title="${why}">${esc(text)}</span>`;
+
+/** 기술 줄: 얻는 방법 표시 · 기술 칸 기술 옆 떠올리기 대체 (ON 일 때, 이미 대체로 쓴 기술은 다음 대체에서 뺌) */
+function movesLine(set, re, rows = null) {
   const used = [];
   const withSub = slug => {
     const r = re?.on && re.kind(slug)?.kind === 'tech' ? re.sub(slug, used) : null;
@@ -79,11 +127,15 @@ function setLines(set, ab, { rows = null, itemSub = null, re = null, alt = null 
     return r ? relearnSubChip(r) : '';
   };
   const chip = (slug, sub = null) => `${moveChip(slug, sub, re)}${withSub(slug)}`;
-  const moves = (rows
+  return (rows
     ? rows.map(r => (r.use === r.orig ? chip(r.use)
       : `<span class="sub-pair">${struck(moveKo(r.orig), '이 게임에서 못 배우는 기술')}<span class="sub-arrow">→</span>${r.use ? chip(r.use, moveKo(r.orig)) : '<span class="faint">대체 없음</span>'}</span>`)).join('')
     : set.mv.length ? set.mv.map(s => chip(s)).join('') : '<span class="faint">입력 안 함</span>')
     + (re && set.mv.some(x => re.kind(x)?.kind === 'tech') ? relearnToggle(re.on) : '');
+}
+
+function setLines(set, ab, { rows = null, itemSub = null, re = null, alt = null } = {}) {
+  const moves = movesLine(set, re, rows);
   // 대체 도구: 이 게임에서 못 구하는 도구 · 도구 기준(구애 빼기 · 도구 없이)으로 뺀 도구 → 대신 지닐 도구 (도구 없이면 없음)
   const itemWhy = slug => ((allowedItems() || new Set()).has(slug) ? itemModeWhy(itemMode()) : '이 게임에서 못 구하는 도구');
   const item = itemSub && itemSub[1] === (set.it || null)
@@ -101,6 +153,79 @@ function setLines(set, ab, { rows = null, itemSub = null, re = null, alt = null 
     + line('특성', ab ? esc(store.engine.abilityKo(ab)) : '')
     + line('성격', natureLabel(set.na))
     + line('개체값', ivText(set.iv || NO_IV));
+}
+
+/**
+ * 게임 추천 세팅 줄: 도구는 없이 계산(구하면 좋은 도구는 덤), 성격·특성·개체값은 지금 그대로 + 바꾸면 좋은 것(선택)
+ * opts: 하면 좋은 선택 [{ kind: 'na'|'ab'|'iv', to, gain }], items: 구하면 좋은 도구 [{ it, diff }]
+ */
+function recLines(set, ab, { re, opts = [], items = [], natureKnown = true }) {
+  const opt = k => opts.find(s => s.kind === k);
+  const plus = g => `<span class="gain-in">+${g.toFixed(1)}</span>`;
+  const na = opt('na'), abil = opt('ab'), iv = opt('iv');
+  const src = set.it ? itemSource(set.it) : null;
+  const item = set.it
+    ? `${esc(itemName(set.it))}${src ? `<em>${esc(src.text)}</em>` : ''}`
+    : `<span class="faint">없이 계산</span>${items.length ? `<em class="opt-line">구하면 ${items.map(a => `${esc(itemName(a.it))} ${plus(a.diff)}`).join(' · ')}</em>` : ''}`;
+  return line('기술', movesLine(set, re))
+    + line('도구', item + itemModeControl(itemMode()))
+    + line('특성', `${ab ? esc(store.engine.abilityKo(ab)) : '—'}${abil ? `<em class="opt-line">트레이닝 칸·특성패치로 ${esc(store.engine.abilityKo(abil.to))} ${plus(abil.gain)} (선택)</em>` : ''}`)
+    + line('성격', `${natureKnown ? natureLabel(set.na) : '모름 <em>무보정 기준</em>'}${na ? `<em class="opt-line">트레이닝 칸·민트로 ${natureLabel(na.to)} ${plus(na.gain)} (선택)</em>` : ''}`)
+    + line('개체값', `${ivText(set.iv || NO_IV)}${iv ? `<em class="opt-line">31로 올리면 ${plus(iv.gain)} (선택)</em>` : ''}`);
+}
+
+const pct = v => `${Math.round(v * 100)}%`;
+/** 승리 플랜: 랭크업 한 번 뒤 · 한 번에/두 번 안에 쓰러뜨리는 비율 · 선공 · 내 파티 약점 보충 */
+function planHtml(w) {
+  const { engine } = store;
+  const lines = [];
+  if (w.setup) {
+    lines.push(`<b>${esc(moveKo(w.setup.slug))}</b> 한 번 쓰고 → 이 맵 상대의 <b>${pct(w.setup.ko)}</b>를 한 번에 <em>(안 쓰면 ${pct(w.ko)})</em>`
+      + (w.setup.fast > w.fast + 0.05 ? ` · 먼저 움직이는 상대 ${pct(w.fast)} → <b>${pct(w.setup.fast)}</b>` : ''));
+  } else {
+    lines.push(`이 맵 상대의 <b>${pct(w.ko)}</b>를 한 번에 · <b>${pct(w.ko2)}</b>를 두 번 안에 쓰러뜨려요`);
+  }
+  lines.push(`이 맵 상대의 ${pct(w.fast)}보다 빨라요${w.prio ? ` · 느릴 땐 <b>${esc(moveKo(w.prio))}</b>(선제기)로 마무리` : ''}`);
+  if (w.covers.length) lines.push(`파티 약점 보충: 파티가 약한 ${w.covers.slice(0, 4).map(t => typeBadge(engine, t, 'sm')).join('')} 상대를 한 번에`);
+  return `<div class="win-plan"><b>승리 플랜</b><ul>${lines.map(l => `<li>${l}</li>`).join('')}</ul></div>`;
+}
+
+/** 기술 칸·기술머신에서 구하면 바꿀 기술 */
+const upgradeHtml = ups => (ups?.length ? `<p class="note tech-up"><b>기술 칸·기술머신에서 구하면</b> ${ups.map(u => `<b>${esc(moveKo(u.learn))}</b>${u.forget ? ` <em>(${esc(moveKo(u.forget))} 대신)</em>` : ''} <span class="gain-in">+${u.gain.toFixed(1)}</span>`).join(' · ')}</p>` : '');
+
+/** 게임 추천 세팅 블록 (멤버 카드 · 포켓몬 검색 공통). r: recommendFor 결과 */
+function recBlock(b, mon, r, { re, title = '이 게임 추천 세팅', src = '도구 없이 · 지금 성격·특성 · 레벨업 기술 우선 · 내 파티 약점 보충' } = {}) {
+  const set = r.best;
+  const desc = describeSet(mon, set, { double: store.game.battle === 'double' });
+  const items = set.it ? [] : itemAlts(b, { mon }, set);
+  const techUsed = set.mv.some(x => !r.cur.mv.includes(x) && re.kind(x)?.kind === 'tech');
+  return `<div class="build-block best">
+      <div class="set-src"><b>${esc(title)}</b><span>${esc(src)}</span></div>
+      <p class="set-why"><b>${esc(desc.role)}</b> ${esc(desc.line)}</p>
+      ${planHtml(r.win)}
+      ${recLines(set, set.ab, { re, opts: r.opts, items, natureKnown: !!r.cur.na })}${metrics(r.top, set)}
+      ${upgradeHtml(r.upgrades)}
+      ${techUsed ? `<p class="note re-note"><b>기술 칸</b> 표시는 레벨업으로 못 배우는 기술이라 기술 칸·학습장치·기술머신으로 배워야 해서, 구하기 어려운 만큼 감점하고도 넣은 기술이에요. <b class="lv">레벨업</b> 기술은 놓쳐도 「내 포켓몬 확인 → 기술 떠올리기」로 다시 배워요.${re.on ? ' <b>↳ 떠올리기</b>는 못 구했을 때 대신 배울 레벨업 기술이에요.' : ''}</p>` : ''}
+    </div>`;
+}
+
+/** 포켓몬 검색(상대 약점 찾기)의 게임 추천 세팅: 내 파티에 넣는다고 보고 (진화 전이면 최종 진화) */
+export function gameRecCard(mon) {
+  const b = getBuilder();
+  if (!b) return null;
+  const target = evoOptions(mon)[0]?.mon || mon;
+  const cur = { lv: store.gameData.finalLevel, mv: [], it: null, na: null, iv: NO_IV, ab: store.engine.defaultAbility(target) };
+  const { need, key } = needFor(null);
+  let map = results.get(b);
+  if (!map) results.set(b, (map = new Map()));
+  const k = `rec|${target.id}|${key}`;
+  if (!map.has(k)) map.set(k, recommendFor(b, target, cur, { need }));
+  const r = map.get(k);
+  return recBlock(b, target, r, {
+    re: learnCtx(b, target, r.best, cur.lv),
+    title: `이 게임 추천 세팅${target.id !== mon.id ? ` · ${target.ko} 기준` : ''}`,
+    src: store.party.length ? '내 파티에 넣는다고 보고 약점 보충 · 도구 없이 · 레벨업 기술 우선' : '도구 없이 · 레벨업 기술 우선 (파티를 넣으면 파티 약점 보충까지)',
+  });
 }
 
 /** 화력 · 받는 피해 · 선공 + 실제 능력치 */
@@ -121,10 +246,10 @@ function stepText(s) {
   switch (s.kind) {
     // free: 레벨업 기술이라 기술 칸 없이 「내 포켓몬 확인 → 기술 떠올리기」로 바로 배움
     case 'move': return `${s.free ? '<span class="todo-where free" title="레벨업 기술이라 기술 칸 없이 내 포켓몬 확인 → 기술 떠올리기로 바로 배워요">떠올리기</span>' : '<span class="todo-where">기술 칸</span>'}<b>${esc(book.bySlug.get(s.learn)?.ko || s.learn)}</b> 배우기${s.forget ? ` <em>← ${esc(book.bySlug.get(s.forget)?.ko || s.forget)} 잊기</em>` : ''}`;
-    case 'na': return `<span class="todo-where">트레이닝 칸</span>성격 → <b>${natureLabel(s.to)}</b>`;
-    case 'ab': return `<span class="todo-where">트레이닝 칸</span>특성 → <b>${esc(store.engine.abilityKo(s.to))}</b>`;
+    case 'na': return `<span class="todo-where${s.optional ? ' opt' : ''}">${s.optional ? '선택 · ' : ''}트레이닝 칸</span>성격 → <b>${natureLabel(s.to)}</b>`;
+    case 'ab': return `<span class="todo-where${s.optional ? ' opt' : ''}">${s.optional ? '선택 · ' : ''}트레이닝 칸</span>특성 → <b>${esc(store.engine.abilityKo(s.to))}</b>`;
     case 'iv': return `<span class="todo-where">선택</span>개체값 31로 올릴 수 있으면: <b>${s.stats.map(k => STAT_LABELS[k]).join(' → ')}</b> <em>(트레이닝 칸 1회에 하나 · 금색병뚜껑이면 한 번에)</em>`;
-    case 'it': return `<span class="todo-where">아이템·상점</span>${s.to ? `<b>${esc(itemName(s.to))}</b> 지니게 하기` : '도구 빼기'}`;
+    case 'it': return `<span class="todo-where${s.optional ? ' opt' : ''}">${s.optional ? '선택 · ' : ''}아이템·상점</span>${s.to ? `<b>${esc(itemName(s.to))}</b> 지니게 하기${s.optional ? ' <em>(나오면)</em>' : ''}` : '도구 빼기'}`;
     default: return '';
   }
 }
@@ -134,7 +259,7 @@ function todoHtml(t) {
   if (!t.steps.length) return `<p class="build-done">✔ 지금 세팅이 ${esc(t.title)}과 같아요.</p>`;
   const skill = t.steps.filter(s => s.kind === 'move' && !s.free).length;
   const free = t.steps.filter(s => s.kind === 'move' && s.free).length;
-  const train = t.steps.filter(s => s.kind === 'na' || s.kind === 'ab').length;
+  const train = t.steps.filter(s => (s.kind === 'na' || s.kind === 'ab') && !s.optional).length;
   const ivOnly = t.steps.every(s => s.optional);
   const diff = Math.round(t.top.score - t.now.score);
   return `<div class="build-todo">
@@ -310,12 +435,11 @@ function targetOptions(b, pm, r) {
     }
     map.set(key, refs);
   }
-  return [{ key: 'best', chip: '최선 (계산)', title: '이 게임 최선 세팅', src: '배울 수 있는 기술·구할 수 있는 도구 중 계산', set: r.best, top: r.top, dropped: [] }, ...map.get(key)];
+  return [{ key: 'best', chip: '추천 세팅', title: '이 게임 추천 세팅', src: '도구 없이 · 지금 성격·특성 · 레벨업 기술 우선 · 내 파티 약점 보충', set: r.best, top: r.top, dropped: [] }, ...map.get(key)];
 }
 
-/** 목표 도구를 못 구했을 때 대신 지닐 도구 (같은 세팅이면 다시 계산하지 않음) */
+/** 목표 도구를 못 구했을 때 대신 지닐 도구 · 도구 없는 세팅이면 구하면 좋은 도구 (같은 세팅이면 다시 계산하지 않음) */
 export function itemAlts(b, pm, set) {
-  if (!set.it) return [];
   let map = results.get(b);
   if (!map) results.set(b, (map = new Map()));
   const key = `alt|${pm.mon.id}|${JSON.stringify(set)}`;
@@ -416,7 +540,7 @@ function editorHtml(i, m, pm) {
     <fieldset class="se-iv"><legend>개체값 31 (트레이닝 칸·금색병뚜껑·우수 개체 ★)</legend>
       ${STAT_LABELS.map((label, k) => `<label class="check"><input type="checkbox" name="iv${k}" ${set.iv[k] ? 'checked' : ''}> ${label}</label>`).join('')}
     </fieldset>
-    <p class="note">기술 목록은 이 게임에서 ${esc(josa(pm.mon.ko, '이가'))} 배울 수 있는 기술 전부예요 (「떠올리기」는 레벨업이 아니라 기술 칸·학습장치의 기술 떠올리기로 배우는 교배·가르침·기술머신 기술).</p>
+    <p class="note">기술 목록은 이 게임에서 ${esc(josa(pm.mon.ko, '이가'))} 배울 수 있는 기술 전부예요 (「레벨업」은 놓쳐도 내 포켓몬 확인 → 기술 떠올리기로 다시 배우고, 「기술 칸」은 기술 칸·학습장치·기술머신·가르침으로만 배워요).</p>
     <div class="se-actions">
       <button class="btn" type="submit">저장</button>
       <button class="btn ghost" type="button" data-act="set-fill" data-i="${i}">고른 세팅으로 채우기</button>
@@ -454,28 +578,16 @@ export function fillEditor(form, best) {
 }
 
 /** 멤버 카드에서 지금 고른 목표 세팅 (입력 폼 "채우기" 용) */
+/** 멤버의 목표 세팅 = 게임 추천 세팅 (실전 세팅은 참고만) */
 export function selectedTarget(i, m, pm) {
   const b = getBuilder(), r = analyzeMember(m, pm);
   if (!b || !r) return null;
-  const opts = targetOptions(b, pm, r);
-  return opts.find(o => o.key === picked.get(i)) || opts[0];
-}
-
-/** 참고 세팅마다 대체한 기술·도구 한눈에 (못 배움·못 구함 → 대체). 줄을 누르면 그 세팅으로 */
-function subSummary(i, list, re = null) {
-  const pair = (from, to, mark = '') => `<span class="sub-pair"><span class="na">${esc(from)}</span><span class="sub-arrow">→</span><b>${esc(to)}</b>${mark}</span>`;
-  return `<div class="sub-summary">
-    <p class="note"><b>참고 세팅 대체 추천</b> 이 게임에서 못 배우는 기술·못 구하는 도구 대신 쓸 것 (누르면 그 세팅으로)</p>
-    ${list.map(o => `<button type="button" class="sub-row" data-pick-set="${i}:${o.key}">
-      <span class="sub-src">${esc(o.chip)}</span>
-      ${[...o.subs.map(([from, to]) => pair(moveKo(from), moveKo(to), re ? learnMark(re.kind(to)) : '')), o.itemSub && pair(itemName(o.itemSub[0]), o.itemSub[1] ? itemName(o.itemSub[1]) : '도구 없이')].filter(Boolean).join('')}
-    </button>`).join('')}
-  </div>`;
+  return targetOptions(b, pm, r)[0];
 }
 
 /**
- * 멤버 카드 (게임 모드): 계산한 최선 세팅 + (입력했으면) 내 세팅과 할 일 + 참고 추천 세팅
- * recommended: 기존 추천 세팅 카드 HTML (Smogon·랜덤배틀)
+ * 멤버 카드 (게임 모드): 내 세팅 → 게임 추천 세팅(승리 플랜 · 파티 약점 보충) → 할 일 → 실전 세팅 참고(접어 둠)
+ * recommended: 기술 데이터 전에 보여 줄 기존 추천 세팅 카드 HTML
  */
 export function buildCard(i, m, pm, { editing = false, recommended = '' } = {}) {
   const head = `<header>${sprite(pm.mon)}<span>${esc(pm.mon.ko)}</span>
@@ -490,39 +602,37 @@ export function buildCard(i, m, pm, { editing = false, recommended = '' } = {}) 
       <div class="set-src"><b>내 세팅</b><span>입력한 그대로 · 이 맵 상대 후보 기준</span></div>
       ${setLines(r.cur, r.cur.ab)}${metrics(r.now, r.cur)}
     </div>` : '';
-  // 목표 세팅 고르기: 계산한 최선 ↔ 참고 추천 세팅 (버튼으로 바꿈)
-  const opts = targetOptions(b, pm, r);
-  const sel = opts.find(o => o.key === picked.get(i)) || opts[0];
-  const ev = sel.top || b.evaluate(pm.mon, sel.set);
-  const desc = describeSet(pm.mon, sel.ref || sel.set, { double: store.game.battle === 'double' || sel.key === 'D' });
-  // 대체한 것 · 대체도 못 찾아 뺀 것 (버튼에도 "대체 N" 으로 표시해 참고 세팅에 대체가 있는 걸 바로 알 수 있게)
-  const subCount = o => (o.subs?.length || 0) + (o.itemSub ? 1 : 0);
-  const swapped = subCount(sel);
-  const lost = [...sel.dropped.map(moveKo), sel.itemMissing && itemName(sel.itemMissing)].filter(Boolean);
-  const anySubs = opts.some(o => subCount(o));
   // 기술 얻는 방법 (멤버 레벨 기준): 레벨업은 놓쳐도 기술 떠올리기로, 기술 칸 기술은 못 구하면 떠올리기 대체
-  const re = learnCtx(b, pm.mon, sel.set, r.cur.lv);
-  const techUsed = sel.set.mv.some(x => !r.cur.mv.includes(x) && re.kind(x)?.kind === 'tech');
-  const tabs = opts.length > 1 ? `<div class="set-tabs" role="tablist" aria-label="세팅 고르기">${opts.map(o => `
-      <button type="button" role="tab" class="set-tab ${o === sel ? 'on' : ''}" aria-selected="${o === sel}" data-pick-set="${i}:${o.key}">${esc(o.chip)}${subCount(o) ? `<span class="tab-sub">대체 ${subCount(o)}</span>` : ''}</button>`).join('')}</div>
-    ${sel.key === 'best' && anySubs ? subSummary(i, opts.filter(o => subCount(o)), re) : ''}` : '';
-  const target = m.set && !editing ? todoHtml({
-    title: sel.key === 'best' ? '최선 세팅' : sel.title,
-    steps: markFree(sel.key === 'best' ? r.steps : b.plan(pm.mon, r.cur, sel.set), re), now: r.now, top: ev,
-  }) : '';
+  const re = learnCtx(b, pm.mon, r.best, r.cur.lv);
+  const target = m.set && !editing ? todoHtml({ title: '추천 세팅', steps: markFree(r.steps, re), now: r.now, top: r.top }) : '';
+  const refs = targetOptions(b, pm, r).slice(1);
   return `<div class="set-card build-card">
     ${head}
     ${editing ? editorHtml(i, m, pm) : ''}
     ${mine}
-    ${tabs}
-    <div class="build-block best">
+    ${recBlock(b, pm.mon, r, { re })}
+    ${target}
+    ${refs.length ? refsHtml(i, b, pm, r, refs) : ''}
+  </div>`;
+}
+
+/** 실전 세팅 참고 (Smogon · 배틀스타디움 · VGC · 랜덤배틀): 이 게임에서 못 배우는 기술·못 구하는 도구는 대체, 접어 둠 */
+function refsHtml(i, b, pm, r, refs) {
+  const sel = refs.find(o => o.key === picked.get(i)) || refs[0];
+  const desc = describeSet(pm.mon, sel.ref || sel.set, { double: store.game.battle === 'double' || sel.key === 'D' });
+  const re = learnCtx(b, pm.mon, sel.set, r.cur.lv);
+  const subCount = o => (o.subs?.length || 0) + (o.itemSub ? 1 : 0);
+  const lost = [...sel.dropped.map(moveKo), sel.itemMissing && itemName(sel.itemMissing)].filter(Boolean);
+  return `<details class="ref-sets" data-ref="${i}" ${refOpen.has(i) ? 'open' : ''}>
+    <summary>실전 세팅 참고 <span class="note">${refs.length}개 · 추천 세팅의 기술 선호도에 반영돼 있어요</span></summary>
+    <div class="set-tabs" role="tablist" aria-label="실전 세팅 고르기">${refs.map(o => `
+      <button type="button" role="tab" class="set-tab ${o === sel ? 'on' : ''}" aria-selected="${o === sel}" data-pick-set="${i}:${o.key}">${esc(o.chip)}${subCount(o) ? `<span class="tab-sub">대체 ${subCount(o)}</span>` : ''}</button>`).join('')}</div>
+    <div class="build-block ref">
       <div class="set-src"><b>${esc(sel.title)}</b><span>${esc(sel.src)}</span></div>
-      <p class="set-why"><b>${esc(desc.role)}</b> ${esc(desc.line)}<span class="faint"> · 이 맵 상대에게 화력 ${Math.round(ev.offense)}% · 선공 ${Math.round(ev.speed * 100)}%</span></p>
-      ${setLines(sel.set, sel.set.ab, { rows: sel.rows, itemSub: sel.itemSub, re, alt: pm.stone ? null : itemAlts(b, pm, sel.set) })}${metrics(ev, sel.set)}
-      ${techUsed ? `<p class="note re-note"><b>기술 칸</b> 레벨업으로는 못 배우는 기술이라 기술 칸·학습장치·기술머신·가르침으로 배워야 해요. <b class="lv">레벨업</b> 기술은 놓쳐도 「내 포켓몬 확인 → 기술 떠올리기」로 다시 배워요.${re.on ? ' <b>↳ 떠올리기</b>는 기술 칸 기술을 못 구했을 때 기술 떠올리기로 대신 배울 레벨업 기술이에요.' : ''}</p>` : ''}
-      ${swapped ? `<p class="note sub-note"><b>대체 추천</b> 취소선은 이 게임에서 못 배우거나 못 구하는 것${itemMode() !== 'all' ? '(추천 도구 기준으로 뺀 도구 포함)' : ''}, 화살표 뒤가 같은 역할로 대신 쓸 기술·도구예요 (점수도 대체한 세팅 기준).</p>` : ''}
+      <p class="set-why"><b>${esc(desc.role)}</b> ${esc(desc.line)}</p>
+      ${setLines(sel.set, sel.set.ab, { rows: sel.rows, itemSub: sel.itemSub, re })}${metrics(sel.top, sel.set)}
+      ${subCount(sel) ? `<p class="note sub-note"><b>대체</b> 취소선은 이 게임에서 못 배우거나 못 구하는 것${itemMode() !== 'all' ? '(추천 도구 기준으로 뺀 도구 포함)' : ''}, 화살표 뒤가 같은 역할로 대신 쓸 기술·도구예요.</p>` : ''}
       ${lost.length ? `<p class="note na-note">대신할 것도 없어서 뺀 것: ${esc(lost.join(', '))}</p>` : ''}
     </div>
-    ${target}
-  </div>`;
+  </details>`;
 }

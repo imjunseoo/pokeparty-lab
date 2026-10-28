@@ -224,6 +224,27 @@ function allowed(st, c) {
   return !st.species.has(c.sp) && !(c.mega && st.megas >= 1);
 }
 
+/**
+ * 내 파티가 약한 상대 가중치 (게임 추천 세팅의 기술 고르기용): 상대 후보 q 마다
+ *   1 + 1.2 × (팀원이 효과 굉장으로 못 찌름: 0 · 같은 배율만 0.5 · 반감 이하만 1) + 1.2 × (팀원 중 그 상대의 자속에 약점인 비율)
+ * skip: 세팅을 고르는 멤버 번호 (그 멤버는 빼고 팀원만 봄, 파티 밖 포켓몬이면 -1)
+ */
+export function partyNeed(ctx, members, skip = -1) {
+  const { engine } = ctx;
+  const others = members.filter((_, j) => j !== skip);
+  const need = new Float32Array(ctx.meta.length).fill(1);
+  if (!others.length) return need;
+  ctx.meta.forEach((m, q) => {
+    let best = 0;
+    for (const o of others) if (o.off[q] > best) best = o.off[q];
+    const gap = best >= 2 ? 0 : best >= 1 ? 0.5 : 1;
+    const stabs = engine.stabTypes(m.mon).map(t => engine.tIdx[t]);
+    const weak = others.filter(o => stabs.some(a => o.def[a] >= 2)).length / others.length;
+    need[q] = 1 + 1.2 * gap + 1.2 * weak;
+  });
+  return need;
+}
+
 /** i 번째 멤버를 다른 모습 c(메가진화 등)로 바꿨을 때 파티 점수 변화 */
 export function formSwapGain(ctx, members, i, c) {
   const rest = stateOf(ctx, members.filter((_, j) => j !== i));

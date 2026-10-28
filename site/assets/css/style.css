@@ -965,3 +965,36 @@ button.type { border: 0; cursor: pointer; }
 .re-note b:first-child { color: var(--warn); }
 .st-free { display: grid; gap: 4px; padding: 8px 10px; border-radius: 10px; background: var(--good-soft); }
 .st-free .st-sub { margin: 0; color: var(--good); }
+
+/* 게임 추천 세팅: 승리 플랜 · 선택 · 기술 칸 업그레이드 · 실전 세팅 참고 */
+.win-plan { padding: 8px 10px; border-radius: 10px; background: var(--good-soft); font-size: 13px; }
+.win-plan > b { color: var(--good); font-size: 12.5px; }
+.win-plan ul { margin: 4px 0 0; padding-left: 18px; display: grid; gap: 3px; }
+.win-plan em { font-style: normal; color: var(--muted); }
+.win-plan .type { vertical-align: 1px; }
+.opt-line { display: block; font-style: normal; font-size: 12px; color: var(--muted); }
+.gain-in { color: var(--good); font-weight: 800; font-variant-numeric: tabular-nums; }
+.tech-up { margin: 0; }
+.tech-up b:first-child { color: var(--warn); margin-right: 4px; }
+.tech-up em { font-style: normal; color: var(--faint); }
+.todo-where.opt { background: var(--surface-2); color: var(--faint); }
+.ref-sets { border-top: 1px dashed var(--border); padding-top: 8px; display: grid; gap: 8px; }
+.ref-sets > summary { cursor: pointer; font-weight: 800; font-size: 13.5px; color: var(--muted); list-style: none; }
+.ref-sets > summary::-webkit-details-marker { display: none; }
+.ref-sets > summary::before { content: '▸ '; }
+.ref-sets[open] > summary::before { content: '▾ '; }
+.ref-sets > summary .note { font-weight: 600; }
+.build-block.ref { opacity: .92; }
+.rec-only { box-shadow: none; }
+/* 테라스탈 · 다이맥스 활용 */
+.gm-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.gm-row { padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); display: grid; gap: 4px; font-size: 13px; }
+.gm-row.on { border-color: var(--accent); background: var(--accent-soft); }
+.gm-weak { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gm-weak .sprite, .gm-picks .sprite { width: 34px; height: 34px; margin: -6px -2px; }
+.gm-weak .mega-stat { margin-left: auto; }
+.gm-picks { margin: 0; padding-left: 4px; list-style: none; display: grid; gap: 4px; }
+.gm-picks li { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gm-moves em, .gm-gmax em { font-style: normal; color: var(--muted); }
+.pill-soft.good { background: var(--good-soft); color: var(--good); }
+.note.bad { color: var(--danger); }

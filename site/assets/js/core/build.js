@@ -13,6 +13,28 @@
 export const BASE_IV = 20, PERFECT_IV = 31;
 const ROLL = 0.925;        // 데미지 난수 평균
 const TAKEN_W = 0.5, SPEED_W = 20, PRIOR_W = 8;
+// 게임 추천 세팅: 레벨업으로 못 배우는 기술(기술 칸·기술머신·가르침·교배)은 구하기 어려운 만큼 기술 하나에 이만큼 감점
+export const TECH_COST = 4;
+// 승리 플랜 가치: 상대를 한 번에 쓰러뜨리는 비율(KO_W) + 랭크업 한 번 뒤 늘어나는 1타 비율(SETUP_KO_W)
+const KO_W = 20, SETUP_KO_W = 15;
+// 랭크업 기술이 올리는 능력 배율 (승리 플랜: 한 번 쓴 뒤)
+const SETUP_BOOST = {
+  // risk: 쓰는 대가로 잃는 것(배북 HP 절반 · 껍질깨기 방어·특방 하락)만큼 승리 플랜 가치를 덜 봄
+  'swords-dance': { atk: 2 }, 'nasty-plot': { spa: 2 }, 'belly-drum': { atk: 4, risk: 0.5 }, 'tail-glow': { spa: 3 },
+  'dragon-dance': { atk: 1.5, spe: 1.5 }, 'quiver-dance': { spa: 1.5, spe: 1.5 }, 'shift-gear': { atk: 1.5, spe: 2 },
+  'shell-smash': { atk: 2, spa: 2, spe: 2, risk: 0.2 }, 'fillet-away': { atk: 2, spa: 2, spe: 2, risk: 0.5 }, geomancy: { spa: 2, spe: 2 },
+  'calm-mind': { spa: 1.5 }, 'bulk-up': { atk: 1.5 }, coil: { atk: 1.5 }, 'hone-claws': { atk: 1.5 }, howl: { atk: 1.5 }, curse: { atk: 1.5 },
+  'work-up': { atk: 1.5, spa: 1.5 }, growth: { atk: 1.5, spa: 1.5 }, 'victory-dance': { atk: 1.5, spe: 1.5 }, 'tidy-up': { atk: 1.5, spe: 1.5 },
+  'no-retreat': { atk: 1.5, spa: 1.5, spe: 1.5 }, 'clangorous-soul': { atk: 1.5, spa: 1.5, spe: 1.5 },
+};
+// 다이맥스 기술 위력 (원래 위력 구간별, 격투·독은 낮음)
+const MAX_POWER = [[40, 90, 70], [50, 100, 75], [60, 110, 80], [70, 120, 85], [100, 130, 90], [140, 140, 95]];
+export const maxPower = mv => {
+  if (!mv.power || mv.cat === 0) return 0;
+  const low = mv.type === 'fighting' || mv.type === 'poison';
+  const row = MAX_POWER.find(([lim]) => mv.power <= lim);
+  return row ? row[low ? 2 : 1] : low ? 100 : 150;
+};
 
 // 성격: slug → [한글, 올리는 능력, 내리는 능력] (1 공격 · 2 방어 · 3 특공 · 4 특방 · 5 스피드, 같으면 무보정)
 export const NATURES = {
@@ -308,28 +330,39 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
   }
 
   /** 기술 부분: 화력 (상대별 최대 데미지, 100% 상한) + 느린 상대에게 선제기 + 변화기 가치 */
-  function movePart(mon, set, p, fixed, pcts, moves) {
-    let off = 0, prioGain = 0;
+  // need[q]: 상대 q 를 얼마나 무겁게 볼지 (내 파티가 약한 상대일수록 큼, 없으면 모두 1)
+  function movePart(mon, set, p, fixed, pcts, moves, need = null) {
+    let off = 0, prioGain = 0, sum = 0, ko = 0, koUp = 0;
     const prio = moves.map(mv => mv.prio > 0 && mv.cat > 0);
+    // 랭크업 한 번 뒤 (공격·특공 배율만큼 데미지가 오른다고 봄): 승리 플랜
+    const boost = moves.map(mv => SETUP_BOOST[mv.slug]).find(Boolean);
+    const up = boost && !CHOICE.has(set.it) ? moves.map(mv => (mv.cat === 1 ? boost.atk || 1 : mv.cat === 2 ? boost.spa || 1 : 0)) : null;
     for (const t of p.targets) {
-      let best = 0, bestPrio = 0;
+      const w = need ? t.w * need[t.q] : t.w;
+      let best = 0, bestPrio = 0, bestUp = 0;
       for (let k = 0; k < pcts.length; k++) {
         const v = pcts[k][t.q];
         if (v > best) best = v;
         if (prio[k] && v > bestPrio) bestPrio = v;
+        if (up && v * up[k] > bestUp) bestUp = v * up[k];
       }
-      off += t.w * Math.min(best, 100);
-      if (fixed.slower[t.q] && bestPrio) prioGain += t.w * Math.min(bestPrio, 100) * 0.25;
+      sum += w;
+      off += w * Math.min(best, 100);
+      if (best >= 100) ko += w;
+      if (up && bestUp >= 100) koUp += w;
+      if (fixed.slower[t.q] && bestPrio) prioGain += w * Math.min(bestPrio, 100) * 0.25;
     }
-    return { offense: off / W, extra: extraValue(mon, moves, set.it) + prioGain / W };
+    const total = need ? sum || 1 : W;
+    const plan = KO_W * ko / total + (up ? SETUP_KO_W * (1 - (boost.risk || 0)) * Math.max(0, koUp - ko) / total : 0);
+    return { offense: off / total, extra: extraValue(mon, moves, set.it) + prioGain / total + plan };
   }
 
   /** 세팅 평가: { score, offense(%), taken(%), speed(0~1), extra, stats } */
-  function evaluate(mon, set) {
+  function evaluate(mon, set, { need = null } = {}) {
     const p = profile(mon, set);
     const moves = (set.mv || []).map(s => book.bySlug.get(s)).filter(Boolean);
     const fixed = fixedPart(mon, set, p);
-    const mp = movePart(mon, set, p, fixed, moves.map(mv => movePcts(p, mv)), moves);
+    const mp = movePart(mon, set, p, fixed, moves.map(mv => movePcts(p, mv)), moves, need);
     const extra = mp.extra + fixed.value;
     return { score: mp.offense - p.takenW * fixed.taken + SPEED_W * fixed.speed + extra, offense: mp.offense, taken: fixed.taken, speed: fixed.speed, extra, stats: p.st };
   }
@@ -361,7 +394,8 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
   }
 
   /** 능력치·도구·특성을 고정하고 기술 4개 고르기 (빈 칸 채우기 → 한 칸씩 바꿔 보기) */
-  function bestMoves(mon, set, { keep = [] } = {}) {
+  // need: 상대별 가중치(내 파티가 약한 상대), cost(slug): 기술을 구하기 어려운 만큼 감점
+  function bestMoves(mon, set, { keep = [], need = null, cost = null } = {}) {
     const p = profile(mon, set);
     const all = learnable(mon, set);
     const pcts = new Map(all.map(mv => [mv.slug, movePcts(p, mv)]));
@@ -369,16 +403,17 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
     const solo = all.filter(mv => mv.cat > 0).map(mv => {
       const row = pcts.get(mv.slug);
       let s = 0;
-      for (const t of p.targets) s += t.w * Math.min(row[t.q], 100);
+      for (const t of p.targets) s += t.w * (need ? need[t.q] : 1) * Math.min(row[t.q], 100);
       return { mv, s };
     }).sort((a, b) => b.s - a.s).slice(0, 40).map(x => x.mv);
-    const status = all.filter(mv => mv.cat === 0 && extraValue(mon, [mv], set.it) > 0.5);
+    // 랭크업 기술은 공격기 없이 혼자 재면 가치가 0 이라 따로 후보에 넣음 (승리 플랜의 핵심)
+    const status = all.filter(mv => mv.cat === 0 && (extraValue(mon, [mv], set.it) > 0.5 || SETUP_BOOST[mv.slug]));
     const cands = [...new Set([...solo, ...status])];
     const fixed = fixedPart(mon, set, p);
     const score = slugs => {
       const moves = slugs.map(s => book.bySlug.get(s));
-      const mp = movePart(mon, set, p, fixed, slugs.map(s => pcts.get(s)), moves);
-      return mp.offense + mp.extra;
+      const mp = movePart(mon, set, p, fixed, slugs.map(s => pcts.get(s)), moves, need);
+      return mp.offense + mp.extra - (cost ? slugs.reduce((a, s) => a + cost(s), 0) : 0);
     };
     let cur = [...new Set((set.mv || []).filter(s => book.bySlug.has(s)))].slice(0, 4);
     for (const s of cur) if (!pcts.has(s)) pcts.set(s, movePcts(p, book.bySlug.get(s)));
@@ -404,6 +439,30 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
     }
     return cur;
   }
+
+  /**
+   * 게임 추천 세팅: 도구는 구하기 힘들어 빼고(메가스톤·폼 도구처럼 정해진 도구만), 개체값·성격·특성은 지금 그대로 두고 기술만 고른다.
+   * need: 내 파티가 약한 상대(파티가 효과 굉장으로 못 찌르거나 파티를 위협하는 상대)를 더 무겁게 → 약점 보충
+   * 레벨업으로 못 배우는 기술(기술 칸·기술머신·가르침·교배)은 지금 알고 있지 않으면 TECH_COST 만큼 감점 (구하기 어려움)
+   */
+  function recommend(mon, cur, { fixedItem = null, need = null } = {}) {
+    const lv = cur.lv || level;
+    const known = new Set(cur.mv || []);
+    const lvs = learnLevels(mon);
+    const cost = slug => (known.has(slug) || (lvs.has(slug) && lvs.get(slug) <= lv) ? 0 : TECH_COST);
+    const abilities = engine.abilitiesOf(mon);
+    const base = { ...cur, lv, iv: cur.iv || [], it: fixedItem || null, na: cur.na || 'hardy', ab: abilities.includes(cur.ab) ? cur.ab : abilities[0] || null };
+    let best = null;
+    for (const seed of [cur.mv || [], []]) {
+      const mv = bestMoves(mon, { ...base, mv: seed.filter(s => book.bySlug.has(s)) }, { need, cost });
+      const v = evaluate(mon, { ...base, mv }, { need }).score - mv.reduce((a, s) => a + cost(s), 0);
+      if (!best || v > best.v + 0.01) best = { v, set: { ...base, mv } };
+    }
+    return best.set;
+  }
+
+  /** 도구 후보 (계산에 반영하는 도구 + 추천 세팅에 자주 나오는 도구, 이 포켓몬이 구할 수 있는 것) */
+  const itemCandidates = mon => (items ? [...items].filter(i => (MODELED_ITEMS.has(i) || prior(mon).it.has(i)) && itemOk(mon, i)) : []);
 
   /**
    * 최선 세팅: 기술 → 성격 → 특성 → 도구 순으로 번갈아 고르기.
@@ -449,9 +508,9 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
    * 지금 세팅 → 최선 세팅으로 가는 할 일 (이득이 큰 순서, 개체값 올리기는 선택이라 맨 끝).
    * 기술: 하나씩 배울 때마다 가장 덜 아까운 기술을 잊는 순서 / 성격·특성: 트레이닝 칸 / 개체값: 트레이닝 칸 1회에 하나 / 도구
    */
-  function plan(mon, cur, best) {
+  function plan(mon, cur, best, { need = null, fixedItem = null } = {}) {
     const steps = [];
-    const sc = s => evaluate(mon, s).score;
+    const sc = s => evaluate(mon, s, { need }).score;
     // 기술: 성격·특성·도구는 최선 상태라고 보고 지금 기술에서 하나씩 바꿔 가며 이득을 잰다
     let state = { ...best, mv: (cur.mv || []).filter(s => book.bySlug.has(s)) };
     const missing = best.mv.filter(m => !state.mv.includes(m));
@@ -478,6 +537,21 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
       steps.push({ kind: key, from: cur[key] || null, to: best[key] || null, gain: top - sc({ ...best, [key]: cur[key] || null }) });
     }
     const out = steps.filter(s => s.gain > 0.05).sort((a, b) => b.gain - a.gain);
+    // 선택: 성격·특성(트레이닝 칸·민트·특성패치) · 도구(아이템 칸·상점, 무작위) — 구하기 어려워 추천 세팅에 넣지 않고 하면 좋은 일로만
+    const opt = [];
+    const tryKey = (key, list) => {
+      let b = null;
+      for (const x of list) {
+        if (x === (best[key] || null)) continue;
+        const gain = sc({ ...best, [key]: x }) - top;
+        if (gain > 0.05 && (!b || gain > b.gain)) b = { kind: key, optional: true, from: best[key] || null, to: x, gain };
+      }
+      if (b) opt.push(b);
+    };
+    tryKey('na', Object.keys(NATURES));
+    tryKey('ab', engine.abilitiesOf(mon));
+    if (!fixedItem && !best.it) tryKey('it', itemCandidates(mon));
+    out.push(...opt.sort((a, b) => b.gain - a.gain));
     // 개체값(선택, 맨 끝 한 줄): 최선 세팅은 지금 개체값 기준이라, 하나씩 31로 올렸을 때 오르는 점수를 이득이 큰 순서로
     //   (트레이닝 칸 1회에 하나, 금색병뚜껑이면 한 번에. 못 올리는 경우가 많아 다른 할 일 뒤에)
     const ivs = [];
@@ -550,17 +624,83 @@ export function createBuilder(ctx, book, { level = 75, battle = 'single', sets =
   }
 
   /**
+   * 승리 플랜: 이 맵 상대 후보 중 한 번에 쓰러뜨리는 비율(ko) · 두 번 안에(ko2) · 먼저 움직이는 비율(fast),
+   * 랭크업 기술이 있으면 한 번 쓴 뒤의 같은 값(setup), 선제기, 내 파티가 약한 상대(need >= 2) 중 한 번에 쓰러뜨리는 상대의 타입(covers)
+   */
+  function winPlan(mon, set, { need = null } = {}) {
+    const p = profile(mon, set);
+    const moves = (set.mv || []).map(s => book.bySlug.get(s)).filter(mv => mv && mv.cat > 0);
+    const measure = prof => {
+      const rows = moves.map(mv => movePcts(prof, mv));
+      const spe = speedOf(prof);
+      let ko = 0, ko2 = 0, fast = 0;
+      const best = new Float32Array(prof.targets.length);
+      for (const t of prof.targets) {
+        for (const r of rows) if (r[t.q] > best[t.q]) best[t.q] = r[t.q];
+        if (best[t.q] >= 100) ko += t.w;
+        if (best[t.q] >= 50) ko2 += t.w;
+        if (spe > t.spe) fast += t.w;
+      }
+      return { ko: ko / W, ko2: ko2 / W, fast: fast / W, best };
+    };
+    const now = measure(p);
+    const setupMv = (set.mv || []).map(s => book.bySlug.get(s)).find(mv => mv && SETUP_BOOST[mv.slug]);
+    let setup = null;
+    if (setupMv && moves.length) {
+      const b = SETUP_BOOST[setupMv.slug];
+      const st = p.st.slice();
+      st[1] *= b.atk || 1; st[3] *= b.spa || 1; st[5] *= b.spe || 1;
+      const after = measure({ ...p, st });
+      setup = { slug: setupMv.slug, ko: after.ko, ko2: after.ko2, fast: after.fast };
+    }
+    // 파티가 약한 상대 중 이 포켓몬이 한 번에 쓰러뜨리는 상대의 타입 (많이 나오는 순)
+    const cover = new Map();
+    if (need) for (const t of p.targets) {
+      if (need[t.q] < 2 || now.best[t.q] < 100) continue;
+      for (const ty of ctx.meta[t.q].mon.t) cover.set(ty, (cover.get(ty) || 0) + t.w);
+    }
+    return {
+      ko: now.ko, ko2: now.ko2, fast: now.fast, setup,
+      prio: moves.find(mv => mv.prio > 0)?.slug || null,
+      covers: [...cover].sort((a, b) => b[1] - a[1]).map(([ty]) => ty),
+    };
+  }
+
+  /**
+   * 다이맥스했을 때의 대면표 (targetTable 과 같은 모양): 공격 기술은 다이맥스 기술 위력(거다이맥스 기술이면 그 타입은 gmax.power),
+   * 명중·연속기·모으기 없음, HP 2배라 받는 피해 절반
+   */
+  function dynamaxTable(mon, set, gmax = null) {
+    const p = profile(mon, set);
+    const moves = (set.mv || []).map(s => book.bySlug.get(s)).filter(mv => mv && mv.cat > 0 && mv.power);
+    const n = p.targets.length, spe = speedOf(p);
+    const best = new Float32Array(n), taken = new Float32Array(n), faster = new Uint8Array(n);
+    const rows = moves.map(mv => {
+      const power = gmax && mv.type === gmax.type && gmax.power > 1 ? gmax.power : maxPower(mv);
+      return movePcts(p, { ...mv, power, hits: 1, acc: 0, fx: '', flags: mv.flags & 128 });
+    });
+    for (const t of p.targets) {
+      for (const r of rows) if (r[t.q] > best[t.q]) best[t.q] = r[t.q];
+      taken[t.q] = takenPct(p, t) / 2;
+      faster[t.q] = spe > t.spe ? 1 : 0;
+    }
+    return { moves: moves.map(mv => mv.slug), best, move: new Int8Array(n).fill(0), taken, faster };
+  }
+
+  /**
    * 목표 도구를 못 구했을 때 대신 지닐 도구 (상점·아이템 칸 도구는 무작위라 노린 도구가 안 나오기 쉬움).
    * 고를 수 있는 도구 중 점수가 높은 순 + 도구 없이. @returns [{ it | null, diff(목표 대비 점수 차) }]
    */
+  // 도구 없는 세팅(게임 추천 세팅)이면 구하면 좋은 도구 (점수가 오르는 것만)
   function itemAlternatives(mon, set, { limit = 3 } = {}) {
-    if (!set.it || !items) return [];
+    if (!items) return [];
     const base = evaluate(mon, set).score;
     const list = [...items].filter(i => i !== set.it && (MODELED_ITEMS.has(i) || prior(mon).it.has(i)) && itemOk(mon, i))
       .map(it => ({ it, diff: evaluate(mon, { ...set, it }).score - base }))
       .sort((a, b) => b.diff - a.diff).slice(0, limit);
+    if (!set.it) return list.filter(x => x.diff > 0.05);
     return [...list, { it: null, diff: evaluate(mon, { ...set, it: null }).score - base }];
   }
 
-  return { evaluate, optimize, plan, learnable, learnLevels, relearnable, itemAlternatives, targetTable, duel, profile, statsAt: (mon, set) => profile(mon, set).st, level };
+  return { evaluate, optimize, recommend, plan, winPlan, dynamaxTable, learnable, learnLevels, relearnable, itemAlternatives, targetTable, duel, profile, statsAt: (mon, set) => profile(mon, set).st, level };
 }

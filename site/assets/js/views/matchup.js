@@ -1,6 +1,6 @@
 // 상대 약점 찾기/포켓몬 검색: 포켓몬 → 약점/내성, 내 파티 대면, 실전·추천 세팅, 카운터, 자속 공격 상성
 import { store, getContext, partyMembers, addRecent, addToParty, usageInfo, isGameMode, gameRule, whereToFind, setsOrder, gameOpts, loadMoves, toggleRelearn, relearnToast, setItemMode } from '../state.js';
-import { substitutesFor } from '../ui/builder.js';
+import { substitutesFor, gameRecCard } from '../ui/builder.js';
 import { createPicker } from '../ui/picker.js';
 import { esc, on, toast, copyText, josa } from '../ui/dom.js';
 import { sprite, typeBadge, typeList, mult, statBars, dexNo, barList, moveLabel, itemLabel, natureText, spreadText, ICONS } from '../ui/components.js';
@@ -268,11 +268,17 @@ function recommendedSection(mon) {
   if (!sets) return `<section class="card">${head}<p class="note">추천 세팅 불러오는 중…</p></section>`;
   const list = orderedSets(sets, mon.id, setsOrder());
   if (!list.length) return `<section class="card">${head}<p class="note">세팅 정보가 없어요.</p></section>`;
-  // 게임 모드: 못 배우는 기술·못 구하는 도구 대신 쓸 것 (기술 데이터를 받으면 다시 그림)
+  // 게임 모드: 이 게임 추천 세팅(내 파티에 넣는다고 보고) 먼저, 실전 세팅은 참고로 접어 둠 (못 배우는 기술·못 구하는 도구는 대체)
   if (isGameMode() && !store.moves) loadMoves();
   const opts = { mode: store.mode, game: gameOpts(), header: false };
-  return `<section class="card">${head}
-    <div class="sets">${list.map(s => setCard(engine, sets, mon, s, { ...opts, subs: isGameMode() ? substitutesFor(mon, s) : null })).join('')}</div></section>`;
+  const cards = `<div class="sets">${list.map(s => setCard(engine, sets, mon, s, { ...opts, subs: isGameMode() ? substitutesFor(mon, s) : null })).join('')}</div>`;
+  if (!isGameMode()) return `<section class="card">${head}${cards}</section>`;
+  const rec = gameRecCard(mon);
+  return `<section class="card">
+    <div class="card-head"><h3>추천 세팅</h3><span class="sub">${esc(gameRule().name)} · 도구 없이 · 레벨업 기술 우선 · 실전 세팅은 참고</span></div>
+    <div class="set-card build-card rec-only">${rec || '<p class="note">기술 데이터 불러오는 중…</p>'}</div>
+    <details class="ref-sets"><summary>실전 세팅 참고 <span class="note">${list.length}개 · 추천 세팅의 기술 선호도에 반영돼 있어요</span></summary>${cards}</details>
+  </section>`;
 }
 
 function usageCard(mon, u) {
