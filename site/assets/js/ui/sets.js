@@ -62,6 +62,16 @@ export function partyTwinNote(info) {
   const effect = info[3].split('.')[0].trim();
   return `아이템 칸·상점에서 「${kind}」${josa(kind, '으로').slice(kind.length)} 나온 ${info[2]}만 지닐 수 있어요. 「파티 아이템」으로 나온 ${josa(info[2], '은는')} 보드 효과(${effect})만 있고 지닐 수 없어요.`;
 }
+/** 도구 이름 옆 짧은 표시: 「배틀 아이템 칸 것만」 (같은 이름 파티 아이템이 없으면 '') */
+export function twinTag(info) {
+  const note = partyTwinNote(info);
+  return note ? `<span class="item-warn" title="${esc(note)}">${info[0] === 'battle' ? '배틀 아이템' : '전용도구'} 칸 것만</span>` : '';
+}
+/** 표시한 도구 중 같은 이름 파티 아이템이 있는 것이 있으면 한 줄 안내 */
+export function twinNoteLine(infos) {
+  const names = [...new Set(infos.filter(i => i?.[2]).map(i => i[2]))];
+  return names.length ? `<p class="note item-warn-note"><b>배틀 아이템 칸 것만</b>: ${esc(names.join('·'))}${josa(names[names.length - 1], '은는').slice(names[names.length - 1].length)} 같은 이름의 <b>파티 아이템</b>(보드 전용, 지닐 수 없음)이 따로 있어요. 아이템 칸·상점에서 「배틀 아이템」 칸으로 나온 것만 지닐 수 있어요.</p>` : '';
+}
 
 /**
  * 세팅 한 개 카드.
@@ -108,8 +118,7 @@ export function setCard(engine, setsData, mon, set, { mode, game = null, header 
   const abilities = (set.ab.length ? set.ab : mon.ab.slice(0, 1)).map(a => esc(engine.abilityKo(a))).join(' <em>/</em> ');
   // 같은 이름의 파티 아이템이 따로 있는 도구(돌격조끼 등): 배틀 아이템으로 나온 것만 지닐 수 있음
   const partyTwin = i => {
-    const note = partyTwinNote(game?.data.itemInfo?.[i]);
-    return note ? `<span class="item-warn" title="${esc(note)}">⚠</span>` : '';
+    return twinTag(game?.data.itemInfo?.[i]);
   };
   const items = set.it.map(i => {
     if (!allowed || allowed.has(i)) return itemName(i) + partyTwin(i);
@@ -135,6 +144,7 @@ export function setCard(engine, setsData, mon, set, { mode, game = null, header 
     ${desc ? `<p class="set-why"><b>${esc(desc.role)}</b> ${esc(desc.line)}</p>` : ''}
     ${line('특성', abilities)}
     ${line('도구', items)}
+    ${game ? twinNoteLine(set.it.filter(i => !allowed || allowed.has(i)).map(i => game.data.itemInfo?.[i])) : ''}
     ${line(set.pool ? '기술 후보' : '기술', moves)}
     ${line('성격', natures + evs)}
     ${line('테라', tera)}

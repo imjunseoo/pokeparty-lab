@@ -1,5 +1,5 @@
 // 메가진화 추천 (메가진화를 쓰는 룰): 파티 중 누구를 메가진화할지 (파티에 하나만)
-// 직접 고른 메가진화가 있으면 그대로 따르고, 없으면 이 맵 상대 후보와 1:1 평균 승률이 가장 많이 오르는 멤버를 자동 추천해
+// 직접 고른 메가진화가 있으면 그대로 따르고, 없으면 상대 플레이어 포켓몬 후보와 1:1 평균 승률이 가장 많이 오르는 멤버를 자동 추천해
 // 그 메가진화 모습 기준으로 파티 분석·최선 세팅(메가스톤 고정)·추천 세팅을 보여 준다 (state.js partyMembers 의 자동 추천)
 import { store, getContext, getBuilder, megaOptions, battleForm, attackTypes, setMegaResolver } from '../state.js';
 import { analyzeMember } from './builder.js';

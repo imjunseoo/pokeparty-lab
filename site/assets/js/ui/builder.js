@@ -5,7 +5,7 @@ import { esc, josa } from './dom.js';
 import { sprite, typeBadge } from './components.js';
 import { NATURES, TYPE_ITEMS, MODELED_ITEMS } from '../core/build.js';
 import { STAT_LABELS } from '../core/engine.js';
-import { itemName, itemSource, itemPartyWarning } from './reasons.js';
+import { itemName, itemSource, itemPartyWarning, itemLabel, itemTwinNote } from './reasons.js';
 import { orderedSets, learnMark, relearnSubChip, relearnToggle, itemModeControl, itemModeWhy } from './sets.js';
 import { describeSet, refSource, setNameKo, moveGroup } from './setdesc.js';
 import { searchSelect, defineOptions, setSearchValue } from './searchselect.js';
@@ -141,15 +141,14 @@ function setLines(set, ab, { rows = null, itemSub = null, re = null, alt = null 
   const item = itemSub && itemSub[1] === (set.it || null)
     ? `<span class="sub-pair">${struck(itemName(itemSub[0]), itemWhy(itemSub[0]))}<span class="sub-arrow">→</span>${set.it
       ? `<span class="is-sub">${esc(itemName(set.it))}<span class="sub-mark">대체</span></span>` : '<span class="faint">도구 없이</span>'}</span>`
-    : set.it ? esc(itemName(set.it)) : '<span class="faint">없음</span>';
-  // 얻는 곳·가격, 같은 이름의 파티 아이템이 있으면 주의
+    : set.it ? itemLabel(set.it) : '<span class="faint">없음</span>';
+  // 얻는 곳·가격 (같은 이름의 파티 아이템이 있으면 이름 옆 「배틀 아이템 칸 것만」 + 아래 안내)
   const src = set.it ? itemSource(set.it) : null;
-  const warn = set.it ? itemPartyWarning(set.it) : null;
-  const itemExtra = (src ? `<em>${esc(src.text)}</em>` : '') + (warn ? `<span class="item-warn" title="${esc(warn)}">⚠ 같은 이름 파티 아이템 주의</span>` : '');
+  const itemExtra = src ? `<em>${esc(src.text)}</em>` : '';
   return line('기술', moves)
     + line('도구', item + itemExtra + (re ? itemModeControl(itemMode()) : ''))
-    + (alt?.length ? `<p class="note item-alt"><b>못 구하면</b> ${alt.map(a => `${a.it ? esc(itemName(a.it)) : '도구 없이'} <span class="faint">${a.diff >= 0 ? '+' : '−'}${Math.abs(a.diff).toFixed(1)}</span>`).join(' · ')}</p>` : '')
-    + (warn ? `<p class="note item-warn-note">${esc(warn)}</p>` : '')
+    + (alt?.length ? `<p class="note item-alt"><b>못 구하면</b> ${alt.map(a => `${a.it ? itemLabel(a.it) : '도구 없이'} <span class="faint">${a.diff >= 0 ? '+' : '−'}${Math.abs(a.diff).toFixed(1)}</span>`).join(' · ')}</p>` : '')
+    + itemTwinNote([set.it, ...(alt || []).map(a => a.it)])
     + line('특성', ab ? esc(store.engine.abilityKo(ab)) : '')
     + line('성격', natureLabel(set.na))
     + line('개체값', ivText(set.iv || NO_IV));
@@ -165,10 +164,11 @@ function recLines(set, ab, { re, opts = [], items = [], natureKnown = true }) {
   const na = opt('na'), abil = opt('ab'), iv = opt('iv');
   const src = set.it ? itemSource(set.it) : null;
   const item = set.it
-    ? `${esc(itemName(set.it))}${src ? `<em>${esc(src.text)}</em>` : ''}`
-    : `<span class="faint">없이 계산</span>${items.length ? `<em class="opt-line">구하면 ${items.map(a => `${esc(itemName(a.it))} ${plus(a.diff)}`).join(' · ')}</em>` : ''}`;
+    ? `${itemLabel(set.it)}${src ? `<em>${esc(src.text)}</em>` : ''}`
+    : `<span class="faint">없이 계산</span>${items.length ? `<em class="opt-line">구하면 ${items.map(a => `${itemLabel(a.it)} ${plus(a.diff)}`).join(' · ')}</em>` : ''}`;
   return line('기술', movesLine(set, re))
     + line('도구', item + itemModeControl(itemMode()))
+    + itemTwinNote([set.it, ...items.map(a => a.it)])
     + line('특성', `${ab ? esc(store.engine.abilityKo(ab)) : '—'}${abil ? `<em class="opt-line">트레이닝 칸·특성패치로 ${esc(store.engine.abilityKo(abil.to))} ${plus(abil.gain)} (선택)</em>` : ''}`)
     + line('성격', `${natureKnown ? natureLabel(set.na) : '모름 <em>무보정 기준</em>'}${na ? `<em class="opt-line">트레이닝 칸·민트로 ${natureLabel(na.to)} ${plus(na.gain)} (선택)</em>` : ''}`)
     + line('개체값', `${ivText(set.iv || NO_IV)}${iv ? `<em class="opt-line">31로 올리면 ${plus(iv.gain)} (선택)</em>` : ''}`);
@@ -180,12 +180,12 @@ function planHtml(w) {
   const { engine } = store;
   const lines = [];
   if (w.setup) {
-    lines.push(`<b>${esc(moveKo(w.setup.slug))}</b> 한 번 쓰고 → 이 맵 상대의 <b>${pct(w.setup.ko)}</b>를 한 번에 <em>(안 쓰면 ${pct(w.ko)})</em>`
+    lines.push(`<b>${esc(moveKo(w.setup.slug))}</b> 한 번 쓰고 → 상대 플레이어 포켓몬의 <b>${pct(w.setup.ko)}</b>를 한 번에 <em>(안 쓰면 ${pct(w.ko)})</em>`
       + (w.setup.fast > w.fast + 0.05 ? ` · 먼저 움직이는 상대 ${pct(w.fast)} → <b>${pct(w.setup.fast)}</b>` : ''));
   } else {
-    lines.push(`이 맵 상대의 <b>${pct(w.ko)}</b>를 한 번에 · <b>${pct(w.ko2)}</b>를 두 번 안에 쓰러뜨려요`);
+    lines.push(`상대 플레이어 포켓몬의 <b>${pct(w.ko)}</b>를 한 번에 · <b>${pct(w.ko2)}</b>를 두 번 안에 쓰러뜨려요`);
   }
-  lines.push(`이 맵 상대의 ${pct(w.fast)}보다 빨라요${w.prio ? ` · 느릴 땐 <b>${esc(moveKo(w.prio))}</b>(선제기)로 마무리` : ''}`);
+  lines.push(`상대 플레이어 포켓몬의 ${pct(w.fast)}보다 빨라요${w.prio ? ` · 느릴 땐 <b>${esc(moveKo(w.prio))}</b>(선제기)로 마무리` : ''}`);
   if (w.covers.length) lines.push(`파티 약점 보충: 파티가 약한 ${w.covers.slice(0, 4).map(t => typeBadge(engine, t, 'sm')).join('')} 상대를 한 번에`);
   return `<div class="win-plan"><b>승리 플랜</b><ul>${lines.map(l => `<li>${l}</li>`).join('')}</ul></div>`;
 }
@@ -232,7 +232,7 @@ export function gameRecCard(mon) {
 function metrics(ev, set) {
   const st = ev.stats.map((v, k) => `${STAT_LABELS[k]} ${v}${set.iv?.[k] ? '★' : ''}`).join(' · ');
   return `<div class="build-metrics">
-      <span title="이 맵 상대 후보에게 기술 하나로 주는 최대 데미지 평균 (100% 상한)">화력 <b>${Math.round(ev.offense)}%</b></span>
+      <span title="상대 플레이어 포켓몬 후보에게 기술 하나로 주는 최대 데미지 평균 (100% 상한)">화력 <b>${Math.round(ev.offense)}%</b></span>
       <span title="상대의 자속 공격(위력 90)에 받는 데미지 평균">받는 피해 <b>${Math.round(ev.taken)}%</b></span>
       <span title="상대보다 빠른 비율">선공 <b>${Math.round(ev.speed * 100)}%</b></span>
       <span class="score">점수 <b>${Math.round(ev.score)}</b></span>
@@ -518,7 +518,7 @@ function editorHtml(i, m, pm) {
   defineOptions(itemList, [{ value: '', label: '없음', sub: '도구 없음' },
     ...itemGroups.flatMap(([group, list]) => list.filter(x => allowed.has(x)).map(x => ({
       value: x, label: itemName(x), keys: `${group} ${x}`,
-      sub: `${group} · ${(itemSource(x)?.price || 0).toLocaleString()}원${itemPartyWarning(x) ? ' · ⚠ 같은 이름 파티 아이템 있음' : ''}`,
+      sub: `${group} · ${(itemSource(x)?.price || 0).toLocaleString()}원${itemPartyWarning(x) ? ' · ⚠ 같은 이름 파티 아이템 있음 (「배틀 아이템」 칸 것만 지님)' : ''}`,
     })))]);
   const itemSelect = pm.stone
     ? `<label>도구<select class="select" name="it" disabled><option value="${pm.stone}">${esc(itemName(pm.stone))} (메가진화)</option></select></label>`
@@ -599,7 +599,7 @@ export function buildCard(i, m, pm, { editing = false, recommended = '' } = {}) 
   if (!r || !b) return `<div class="set-card build-card">${head}${recommended}</div>`;
   const mine = m.set && !editing ? `
     <div class="build-block mine">
-      <div class="set-src"><b>내 세팅</b><span>입력한 그대로 · 이 맵 상대 후보 기준</span></div>
+      <div class="set-src"><b>내 세팅</b><span>입력한 그대로 · 상대 플레이어 포켓몬 후보 기준</span></div>
       ${setLines(r.cur, r.cur.ab)}${metrics(r.now, r.cur)}
     </div>` : '';
   // 기술 얻는 방법 (멤버 레벨 기준): 레벨업은 놓쳐도 기술 떠올리기로, 기술 칸 기술은 못 구하면 떠올리기 대체

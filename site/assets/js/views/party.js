@@ -236,7 +236,7 @@ function renderOptions(ctx) {
         <label class="field">배틀 <select class="select" data-game="battle">${opt(data.battleModes, g.battle, b => b.name)}</select></label>
         <label class="field">추천 도구 <select class="select" data-game="items" title="구애 도구는 상점·아이템 칸에서 무작위라 구하기 힘들어요">${opt(ITEM_MODES, g.items || 'all', m => `${m.name} — ${m.desc}`)}</select></label>
         <label class="check"><input type="checkbox" data-game="legends" ${g.legends ? 'checked' : ''}> 미라클교환·레이드 전설도 예시에 포함</label>
-        <p class="note">후보: 이 맵에서 잡을 수 있는 포켓몬 ${ctx.pool.length}종 (마지막 토너먼트 Lv.${data.finalLevel}). 방장이 고른 룰과 맵 투표 결과에 맞춰 바꿔 주세요.</p>
+        <p class="note">후보: 이 맵에서 잡을 수 있는 포켓몬 ${ctx.pool.length}종 (마지막 토너먼트 Lv.${data.finalLevel}). 다른 플레이어도 같은 포켓몬을 잡으니 <b>상대 플레이어 포켓몬 후보</b>도 이 목록이에요 (NPC 트레이너는 빼고). 방장이 고른 룰과 맵 투표 결과에 맞춰 바꿔 주세요.</p>
       </div>`;
   } else if (info) {
     optionsEl.innerHTML = `
@@ -405,7 +405,7 @@ function renderMega() {
       <span class="mega-rank">${k + 1}</span>
       <span class="mega-mon">${sprite(o.base)}<span class="mega-arrow">→</span>${sprite(o.mon)}<span><b>${esc(o.mon.ko)}</b>${typeList(engine, o.mon.t, 'sm')}
         <span class="note">${esc(itemName(o.stone))}${p ? ` · 기믹 상점 ${p.toLocaleString()}원` : ''}${base && base.id !== o.base.id ? ` · ${esc(base.ko)}에서 진화 후` : ''}</span></span></span>
-      ${o.rate0 !== null ? `<span class="mega-stat" title="이 맵 상대 후보와 1:1로 붙었을 때 먼저 쓰러뜨리는 비율 (메가진화 전 → 후)"><span class="bt-k">평균 승률</span>${pct(o.rate0)} → <b>${pct(o.rate1)}</b> <em class="${o.gain >= 0 ? 'good' : 'bad'}">${o.gain >= 0 ? '+' : '−'}${Math.round(Math.abs(o.gain) * 100)}%p</em></span>` : ''}
+      ${o.rate0 !== null ? `<span class="mega-stat" title="상대 플레이어 포켓몬 후보와 1:1로 붙었을 때 먼저 쓰러뜨리는 비율 (메가진화 전 → 후)"><span class="bt-k">평균 승률</span>${pct(o.rate0)} → <b>${pct(o.rate1)}</b> <em class="${o.gain >= 0 ? 'good' : 'bad'}">${o.gain >= 0 ? '+' : '−'}${Math.round(Math.abs(o.gain) * 100)}%p</em></span>` : ''}
       <span class="mega-stat" title="파티 상성 점수 변화 (약점 겹침·공격 범위·종족값)"><span class="bt-k">파티 상성</span><em class="${o.fit >= 0 ? 'good' : 'bad'}">${o.fit >= 0 ? '+' : '−'}${Math.abs(o.fit).toFixed(1)}</em>${o.fit <= FIT_WARN ? `<small class="mega-warn" title="${esc(o.mon.ko)}의 타입이 다른 멤버와 약점이 겹쳐요">약점 겹침</small>` : ''}</span>
       ${on ? '<span class="mega-on">적용 중</span>' : `<button type="button" class="btn sm" data-mega-pick="${o.i}:${o.id}">이걸로</button>`}
     </li>`;
@@ -417,7 +417,7 @@ function renderMega() {
       ${plan.explicit !== null || none ? '<button type="button" class="btn sm ghost" data-act="mega-auto">자동 추천으로</button>' : ''}
       ${!none ? '<button type="button" class="btn sm ghost" data-act="mega-none">메가진화 안 함</button>' : ''}
     </div>
-    <p class="note">${plan.rated ? '평균 승률 = 이 맵 상대 후보와 1:1로 붙었을 때 먼저 쓰러뜨리는 비율 (내 세팅을 입력했으면 그 기술, 아니면 모습마다 최선 세팅 · 기본 개체값). 직접 고르지 않으면 가장 많이 오르는 멤버를 자동으로 골라요.' : '기술 데이터를 불러오면 평균 승률로 다시 골라요 (지금은 파티 상성 기준).'}
+    <p class="note">${plan.rated ? '평균 승률 = 상대 플레이어 포켓몬 후보와 1:1로 붙었을 때 먼저 쓰러뜨리는 비율 (내 세팅을 입력했으면 그 기술, 아니면 모습마다 최선 세팅 · 기본 개체값). 직접 고르지 않으면 가장 많이 오르는 멤버를 자동으로 골라요.' : '기술 데이터를 불러오면 평균 승률로 다시 골라요 (지금은 파티 상성 기준).'}
       메가진화한 멤버는 아래 멤버 카드에서 <b>메가진화 모습 기준 최선 세팅(메가스톤 고정)</b>과 추천 세팅을 보여 줘요.</p>`;
 }
 
@@ -476,8 +476,8 @@ function renderAnalysis(ctx, members) {
   }
   const a = analyze(ctx, members);
   analysisEl.innerHTML = [
-    rankCard(ctx, members),
     setsCard(members),
+    rankCard(ctx, members),
     members.length < 6 ? scoreCard(a, members) : '',   // 6마리면 위의 "6마리 완성 · 파티 평가"에 등급이 있음
     diagCard(a),
     `<details class="deep card" id="p-deep" ${deepOpen ? 'open' : ''}>
@@ -488,7 +488,7 @@ function renderAnalysis(ctx, members) {
 }
 
 // 멤버 점수 (0~100) = 전투력 45% + 파티 기여 35% + 기본 능력 20%
-//   전투력: 세팅 점수(내 세팅을 넣었으면 지금 세팅, 아니면 이 게임 최선 세팅) — 이 맵 상대 후보와 1:1로 싸울 때의 힘
+//   전투력: 세팅 점수(내 세팅을 넣었으면 지금 세팅, 아니면 이 게임 추천 세팅) — 상대 플레이어 포켓몬 후보와 1:1로 싸울 때의 힘
 //   파티 기여: 이 멤버를 빼면 파티 점수가 얼마나 떨어지는지 (약점 보완·공격 범위, 약점이 겹치면 마이너스)
 //   기본 능력: 종족값 (최종 진화·메가진화 기준)
 const RANKS = [[75, '에이스', 'ace'], [60, '주전', 'good'], [45, '보통', 'ok'], [0, '교체 후보', 'weak']];
@@ -525,7 +525,7 @@ function rankCard(ctx, members) {
       if (ev.speed >= 0.8) good.push('대부분보다 빨라요');
       if (ev.taken >= 60) bad.push('잘 버티지 못해요');
     }
-    const potential = r?.now && r.top.score - r.now.score >= 5 ? `<p class="note">최선 세팅이면 전투력 ${pct(r.top.score, 30, 115)} (지금 ${row.battle}) — 아래 멤버별 세팅의 할 일 참고</p>` : '';
+    const potential = r?.now && r.top.score - r.now.score >= 5 ? `<p class="note">추천 세팅이면 전투력 ${pct(r.top.score, 30, 115)} (지금 ${row.battle}) — 위 멤버별 세팅의 할 일 참고</p>` : '';
     // 교체 후보: 이 자리에 대신 넣으면 좋은 후보 (게임에서 잡을 수 있는 포켓몬 중)
     const swap = row.rank[2] === 'weak' || (k === rows.length - 1 && row.total < 55);   // 꼴찌가 낮으면 교체 후보도 보여 줌
     const alts = swap ? alternativesFor(ctx, members, row.i, 6)
@@ -540,7 +540,7 @@ function rankCard(ctx, members) {
       <div class="mr-main">
         <div class="mr-name"><b>${esc(m.base.ko)}</b>${m.mon.id !== m.base.id ? `<span class="note">→ ${esc(m.mon.ko)}</span>` : ''}<span class="pill-soft mr-pill">${row.rank[1]}</span></div>
         <div class="mr-bars">
-          ${bar('전투력', row.battle, ev ? `${r.now ? '지금 세팅' : '최선 세팅'} 기준 · 화력 ${Math.round(ev.offense)}% · 받는 피해 ${Math.round(ev.taken)}% · 선공 ${Math.round(ev.speed * 100)}%` : '종족값 기준 (게임 룰 모드에서 세팅으로 계산)')}
+          ${bar('전투력', row.battle, ev ? `${r.now ? '지금 세팅' : '추천 세팅'} 기준 · 화력 ${Math.round(ev.offense)}% · 받는 피해 ${Math.round(ev.taken)}% · 선공 ${Math.round(ev.speed * 100)}%` : '종족값 기준 (게임 룰 모드에서 세팅으로 계산)')}
           ${bar('파티 기여', row.synergy, '빼면 파티 점수가 얼마나 떨어지는지 (약점이 겹치면 낮음)')}
           ${bar('기본 능력', row.raw, `종족값 ${engine.effectiveBst(m.mon)}`)}
         </div>
@@ -552,9 +552,9 @@ function rankCard(ctx, members) {
   }).join('');
   return `<section class="card">
     <div class="card-head"><h3>멤버 점수 · 누가 좋은 포켓몬?</h3>
-      <span class="sub">전투력 45% + 파티 기여 35% + 기본 능력 20% · ${isGameMode() ? `${esc(store.gameData.maps.find(x => x.key === store.game.map)?.name || '')} 맵 상대 후보 기준` : '지금 데이터 기준'}</span></div>
+      <span class="sub">전투력 45% + 파티 기여 35% + 기본 능력 20% · ${isGameMode() ? `${esc(store.gameData.maps.find(x => x.key === store.game.map)?.name || '')} 상대 플레이어 포켓몬 기준` : '지금 데이터 기준'}</span></div>
     <ol class="member-rank">${items}</ol>
-    ${isGameMode() && !store.party.some(x => x.set) ? '<p class="note">「내 세팅 입력」을 하면 전투력이 지금 세팅 기준으로 바뀌어요 (입력 전에는 최선 세팅 기준).</p>' : ''}
+    ${isGameMode() && !store.party.some(x => x.set) ? '<p class="note">「내 세팅 입력」을 하면 전투력이 지금 세팅 기준으로 바뀌어요 (입력 전에는 추천 세팅 기준).</p>' : ''}
   </section>`;
 }
 
@@ -583,7 +583,7 @@ function setsCard(members) {
     const cards = members.map((m, i) => buildCard(i, store.party[i], m, { editing: editing === i, recommended: recommendedCard(m, i) })).join('');
     return `
     <section class="card">
-      <div class="card-head"><h3>멤버별 세팅</h3><span class="sub">${esc(`${gameRule().name} · ${battleMode() === 'double' ? '더블' : '싱글'} · Lv.${store.gameData.finalLevel} 기준 · 「내 세팅 입력」으로 지금 세팅을 넣으면 최선까지 할 일을 알려줘요`)}</span></div>
+      <div class="card-head"><h3>멤버별 세팅</h3><span class="sub">${esc(`${gameRule().name} · ${battleMode() === 'double' ? '더블' : '싱글'} · Lv.${store.gameData.finalLevel} 기준 · 「내 세팅 입력」으로 지금 세팅을 넣으면 추천 세팅까지 할 일을 알려줘요`)}</span></div>
       <div class="sets">${cards}</div>
     </section>`;
   }

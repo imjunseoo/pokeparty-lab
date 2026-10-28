@@ -141,7 +141,7 @@ function memberCard(i, res, rated) {
   const rows = list.map((o, k) => `<li class="mega-row ${o.cur ? 'on' : ''}">
       <span class="mega-rank">${k + 1}</span>
       <span class="mega-mon">${sprite(o.mon)}<span><b>${esc(label(o))}</b>${typeList(engine, o.mon.t, 'sm')}<span class="note">${esc(howText(o))}</span></span></span>
-      ${o.rate !== undefined ? `<span class="mega-stat" title="이 맵 상대 후보와 1:1로 붙었을 때 먼저 쓰러뜨리는 비율"><span class="bt-k">평균 승률</span><b>${pct(o.rate)}</b>${o.cur || cur.rate === undefined ? '' : ` <em class="${o.rate >= cur.rate ? 'good' : 'bad'}">${signed((o.rate - cur.rate) * 100, '%p')}</em>`}</span>`
+      ${o.rate !== undefined ? `<span class="mega-stat" title="상대 플레이어 포켓몬 후보와 1:1로 붙었을 때 먼저 쓰러뜨리는 비율"><span class="bt-k">평균 승률</span><b>${pct(o.rate)}</b>${o.cur || cur.rate === undefined ? '' : ` <em class="${o.rate >= cur.rate ? 'good' : 'bad'}">${signed((o.rate - cur.rate) * 100, '%p')}</em>`}</span>`
         : `<span class="mega-stat"><span class="bt-k">평균 승률</span><span class="faint">${rated ? '—' : '계산 중'}</span></span>`}
       <span class="mega-stat" title="지금 고른 모습 대비 파티 상성 점수 변화 (약점 겹침·공격 범위·종족값)"><span class="bt-k">파티 상성</span>${o.cur ? '<span class="faint">기준</span>' : `<em class="${o.fit >= 0 ? 'good' : 'bad'}">${signed(o.fit)}</em>`}</span>
       ${o.cur ? '<span class="mega-on">지금 기준</span>' : `<button type="button" class="btn sm" data-form-apply="${i}|${o.kind}|${o.value}" data-name="${esc(label(o))}">이걸로</button>`}

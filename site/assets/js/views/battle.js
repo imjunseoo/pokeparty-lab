@@ -224,7 +224,7 @@ function boardCard(rows, board) {
   return `<section class="card">
     <div class="card-head"><h3><span class="tile-ic ic-gym">관장</span>상대 타입별 대응</h3><span class="sub">체육관 관장 · 트레이너</span></div>
     <p class="note bt-rule">체육관 관장은 한 타입 포켓몬 3마리(30·40턴 판 4마리)를 그 라운드 레벨·개체값 20으로 내보내요. 관장 타입이 나오면 그 칸의 <b>공격</b> 멤버를 먼저, 위험할 땐 <b>받기</b> 멤버로 교체하세요.
-      (이 맵 상대 후보 중 그 타입을 가진 포켓몬 평균, 「1타」는 한 번에 쓰러뜨리는 비율)</p>
+      (상대 플레이어 포켓몬 후보 중 그 타입을 가진 포켓몬 평균, 「1타」는 한 번에 쓰러뜨리는 비율)</p>
     <div class="bt-types">${board.map(cell).join('')}</div>
   </section>`;
 }
@@ -248,9 +248,9 @@ function memberCard(ctx, r, table, board) {
     <header>${sprite(r.mon)}<b>${esc(r.mon.ko)}</b><span class="note">${r.known ? '내 세팅' : '추천 세팅'} · Lv.${r.set.lv || store.gameData.finalLevel}${r.set.it ? ` · ${esc(itemName(r.set.it))}` : ''}</span></header>
     <p class="set-why"><b>${esc(desc.role)}</b> ${esc(desc.line)}</p>
     <ul class="bt-jobs">${jobs}</ul>
-    <p class="note bt-jobs-note">주력 % = 이 맵 상대 중 그 기술이 가장 센 비율 · 타입은 효과 굉장</p>
+    <p class="note bt-jobs-note">주력 % = 상대 플레이어 포켓몬 중 그 기술이 가장 센 비율 · 타입은 효과 굉장</p>
     <div class="bt-lines">
-      <div><span class="bt-k">선공</span>이 맵 상대의 ${pct(g.speed * 100)}보다 빠름 <span class="faint">(스피드 ${getBuilder().statsAt(r.mon, r.set)[5]})</span></div>
+      <div><span class="bt-k">선공</span>상대 플레이어 포켓몬의 ${pct(g.speed * 100)}보다 빠름 <span class="faint">(스피드 ${getBuilder().statsAt(r.mon, r.set)[5]})</span></div>
       ${g.best.length ? `<div><span class="bt-k">내보낼 때</span>${g.best.slice(0, 8).map(t => typeBadge(engine, t, 'sm')).join('')}</div>` : ''}
       ${weak ? `<div><span class="bt-k">조심</span>${weak}</div>` : ''}
       ${g.resist.length ? `<div><span class="bt-k">받아냄</span>${g.resist.map(t => typeBadge(engine, t, 'sm')).join('')}${g.immune.length ? ' <em>(무효 포함)</em>' : ''}</div>` : ''}

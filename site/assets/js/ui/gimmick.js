@@ -1,6 +1,6 @@
 // 테라스탈·다이맥스 활용 카드 (파티 추천 화면, 그 기믹을 쓰는 룰일 때)
 //   테라스탈: 파티 여럿이 약점인 타입을 누가 어떤 테라 타입으로 막는지 (테라피스를 지녀야 하고 한 번 쓰면 사라짐 · 마스터테라주얼로 테라 타입 바꾸기)
-//   다이맥스: 누구를 다이맥스·거다이맥스하면 이 맵 상대와 1:1 평균 승률이 가장 오르는지 + 다이맥스 기술 추가 효과
+//   다이맥스: 누구를 다이맥스·거다이맥스하면 상대 플레이어 포켓몬과 1:1 평균 승률이 가장 오르는지 + 다이맥스 기술 추가 효과
 import { store, gameRule, getBuilder } from '../state.js';
 import { analyzeMember } from './builder.js';
 import { teraPlan, MAX_MOVE, gmaxEffect } from '../core/gimmick.js';
@@ -58,7 +58,7 @@ export function dynamaxCard(ctx, members) {
   const top = rows[0];
   const row = x => `<li class="gm-row ${x === top ? 'on' : ''}">
       <div class="gm-weak">${sprite(x.pm.mon)}<b>${esc(x.pm.mon.ko)}</b>
-        <span class="mega-stat" title="이 맵 상대 후보와 1:1로 붙었을 때 먼저 쓰러뜨리는 비율 (다이맥스 3턴 · HP 2배 · 다이맥스 기술 위력)"><span class="bt-k">평균 승률</span>${pct(x.base)} → <b>${pct(x.after)}</b> <em class="${x.gain >= 0 ? 'good' : 'bad'}">${x.gain >= 0 ? '+' : '−'}${Math.round(Math.abs(x.gain) * 100)}%p</em></span></div>
+        <span class="mega-stat" title="상대 플레이어 포켓몬 후보와 1:1로 붙었을 때 먼저 쓰러뜨리는 비율 (다이맥스 3턴 · HP 2배 · 다이맥스 기술 위력)"><span class="bt-k">평균 승률</span>${pct(x.base)} → <b>${pct(x.after)}</b> <em class="${x.gain >= 0 ? 'good' : 'bad'}">${x.gain >= 0 ? '+' : '−'}${Math.round(Math.abs(x.gain) * 100)}%p</em></span></div>
       <div class="note gm-moves">${x.types.map(t => `${typeBadge(engine, t, 'sm')} ${MAX_MOVE[t][0]} <em>${MAX_MOVE[t][1]}</em>`).join(' · ') || '공격 기술 없음'}</div>
       ${x.gm ? `<div class="note gm-gmax"><span class="pill-soft accent">거다이맥스 가능</span> 다이스프 ${price('maxsoup')}원 · ${typeBadge(engine, x.gm.type, 'sm')} <b>${esc(x.gm.ko)}</b> — ${esc(gmaxEffect(x.gm.fn) || '거다이맥스 전용 효과')}</div>` : ''}
     </li>`;

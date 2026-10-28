@@ -2,7 +2,7 @@
 import { store, whereToFind } from '../state.js';
 import { esc, josa } from './dom.js';
 import { typeBadge } from './components.js';
-import { partyTwinNote } from './sets.js';
+import { partyTwinNote, twinTag, twinNoteLine } from './sets.js';
 
 /** 추천 후보 → 파티에 넣을 모습: 진화 전으로만 잡히면 그 모습 + 진화 목표, 메가진화 후보면 메가 폼 */
 export function addPlan(c) {
@@ -32,6 +32,10 @@ export function itemSource(slug) {
 }
 /** 같은 이름의 파티 아이템이 따로 있는 도구 (돌격조끼·자석·레드카드…) 안내 문장 | null */
 export const itemPartyWarning = slug => partyTwinNote(store.gameData?.itemInfo?.[slug]);
+/** 도구 이름 + 같은 이름 파티 아이템이 있으면 「배틀 아이템 칸 것만」 표시 (HTML) */
+export const itemLabel = slug => `${esc(itemName(slug))}${twinTag(store.gameData?.itemInfo?.[slug])}`;
+/** 보여 준 도구들 중 같은 이름 파티 아이템이 있는 것 안내 한 줄 (HTML | '') */
+export const itemTwinNote = slugs => twinNoteLine(slugs.filter(Boolean).map(s => store.gameData?.itemInfo?.[s]));
 
 export function reasonChip(engine, r) {
   switch (r.kind) {

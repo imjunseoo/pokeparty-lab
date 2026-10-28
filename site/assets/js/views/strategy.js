@@ -12,7 +12,7 @@ import { recommendTypes, memberValues } from '../core/party.js';
 import { STAT_LABELS } from '../core/engine.js';
 import { esc, on, toast, josa } from '../ui/dom.js';
 import { sprite, typeBadge } from '../ui/components.js';
-import { itemName, itemSource, itemPartyWarning, catchHint } from '../ui/reasons.js';
+import { itemName, itemSource, itemPartyWarning, itemLabel, itemTwinNote, catchHint } from '../ui/reasons.js';
 import { relearnToggle, relearnSubChip, itemModeControl } from '../ui/sets.js';
 import { searchSelect, defineOptions, bindSearchSelects } from '../ui/searchselect.js';
 import { openSetEditor } from './party.js';
@@ -211,7 +211,7 @@ function itemCard(b, rows, items) {
   const it = store.gameData.items;
   defineOptions('st-item', [...it.battle, ...it.berry].filter(x => allowed.has(x)).map(x => ({
     value: x, label: itemName(x), keys: `${it.battle.includes(x) ? '배틀 아이템' : '나무열매'} ${x}`,
-    sub: `${it.battle.includes(x) ? '배틀 아이템' : '나무열매'} · ${(itemSource(x)?.price || 0).toLocaleString()}원${itemPartyWarning(x) ? ' · ⚠ 같은 이름 파티 아이템 있음' : ''}`,
+    sub: `${it.battle.includes(x) ? '배틀 아이템' : '나무열매'} · ${(itemSource(x)?.price || 0).toLocaleString()}원${itemPartyWarning(x) ? ' · ⚠ 같은 이름 파티 아이템 있음 (「배틀 아이템」 칸 것만 지님)' : ''}`,
   })));
   const list = actList(items, a => {
     const r = rows[a.i];
@@ -219,8 +219,8 @@ function itemCard(b, rows, items) {
     // 못 구하면: 대신 지닐 도구 1순위 · 도구 없이 (메가스톤은 정해진 도구라 없음)
     const alt = r.stone ? [] : itemAlts(b, r.pm, r.target);
     const altText = alt.length ? [alt[0], alt[alt.length - 1]].filter((x, k, l) => l.indexOf(x) === k)
-      .map(x => `${x.it ? esc(itemName(x.it)) : '도구 없이'} ${x.diff >= 0 ? '+' : '−'}${Math.abs(x.diff).toFixed(1)}`).join(' · ') : '';
-    return `<li>${who(r)}<span class="st-what"><b>${esc(itemName(a.to))}</b> 지니게 하기${a.from ? ` <em>← ${esc(itemName(a.from))}</em>` : ''}${assumedTag(a)}${src ? `<span class="st-src">${esc(src.text)}</span>` : ''}${altText ? `<span class="st-src">못 구하면 ${altText}</span>` : ''}</span>${gainText(a.gain)}${doneBtn(r, `${a.i}|it|${a.to}`)}</li>`;
+      .map(x => `${x.it ? itemLabel(x.it) : '도구 없이'} ${x.diff >= 0 ? '+' : '−'}${Math.abs(x.diff).toFixed(1)}`).join(' · ') : '';
+    return `<li>${who(r)}<span class="st-what"><b>${itemLabel(a.to)}</b> 지니게 하기${a.from ? ` <em>← ${esc(itemName(a.from))}</em>` : ''}${assumedTag(a)}${src ? `<span class="st-src">${esc(src.text)}</span>` : ''}${altText ? `<span class="st-src">못 구하면 ${altText}</span>` : ''}</span>${gainText(a.gain)}${doneBtn(r, `${a.i}|it|${a.to}`)}</li>`;
   });
   let found = '';
   if (lookup) {
@@ -242,6 +242,7 @@ function itemCard(b, rows, items) {
     ${found}
     <h4 class="st-sub">목표 도구</h4>
     ${list || (itemMode() === 'none' ? '<p class="note">도구 없이 보는 중이라 목표 도구가 없어요. 나온 도구는 위에서 검색하세요.</p>' : '<p class="build-done">✔ 모두 목표 도구를 지녔어요.</p>')}
+    ${list ? itemTwinNote(items.map(a => a.to)) : ''}
     <div class="st-foot"><span class="note">추천 도구</span>${itemModeControl(itemMode())}</div>
   </section>`;
 }
@@ -263,16 +264,17 @@ function shopCard(rows, items, growth) {
   for (const a of held) {
     const r = rows[a.i], src = itemSource(a.to);
     total += src?.price || 0;
-    lines.push(`<li>${who(r)}<span class="st-what"><b>${esc(itemName(a.to))}</b> 사서 지니기${src ? `<span class="st-src">${esc(src.text)}</span>` : ''}</span>${gainText(a.gain)}</li>`);
+    lines.push(`<li>${who(r)}<span class="st-what"><b>${itemLabel(a.to)}</b> 사서 지니기${src ? `<span class="st-src">${esc(src.text)}</span>` : ''}</span>${gainText(a.gain)}</li>`);
   }
   const random = items.filter(a => !held.includes(a));
-  const randomLine = random.length ? `<li class="st-plain"><span class="st-what">일반 상품에 나오면: ${random.slice(0, 4).map(a => `<b>${esc(itemName(a.to))}</b> <span class="faint">(${esc(rows[a.i].mon.ko)} · ${(itemSource(a.to)?.price || 0).toLocaleString()}원)</span>`).join(', ')}</span></li>` : '';
+  const randomLine = random.length ? `<li class="st-plain"><span class="st-what">일반 상품에 나오면: ${random.slice(0, 4).map(a => `<b>${itemLabel(a.to)}</b> <span class="faint">(${esc(rows[a.i].mon.ko)} · ${(itemSource(a.to)?.price || 0).toLocaleString()}원)</span>`).join(', ')}</span></li>` : '';
   const party = data.tourneyShop.filter(t => t.shop && growth[t.key]).sort((a, b) => growth[b.key].gain - growth[a.key].gain)
     .map(t => `<b>${esc(t.name)}</b> <span class="faint">(${esc(rows[growth[t.key].i].mon.ko)} · ${t.shop.toLocaleString()}원)</span>`);
   return `<section class="card st-card">
     ${tileHead('ic-shop', '상점', '지나가기만 해도 들름')}
     <p class="note st-rule">일반 상품(파티 아이템 + 배틀 아이템·기술머신·나무열매 중 2종, 5턴마다 바뀜) · 진화도구(균일가) · 전용도구 · 기믹(룰에 따라) 칸이 있어요.</p>
     ${lines.length || randomLine ? `<ol class="st-acts plain">${lines.join('')}${randomLine}</ol>` : '<p class="build-done">✔ 꼭 살 것은 없어요.</p>'}
+    ${itemTwinNote([...held, ...random.slice(0, 4)].map(a => a.to))}
     ${party.length ? `<p class="note st-party-items"><b>파티 아이템 칸에 나오면</b> ${party.join(', ')}</p>` : ''}
     ${total ? `<p class="st-total">꼭 살 것 합계 <b>${total.toLocaleString()}원</b></p>` : ''}
   </section>`;

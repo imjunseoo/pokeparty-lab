@@ -36,7 +36,7 @@ export function duelRank(b, rows, foe, foeSet) {
 }
 
 /**
- * 평균 승률: 이 맵 상대 후보 하나하나와 1:1 로 붙었을 때 먼저 쓰러뜨리는 비율 (출현 가중치, 상대는 자속 위력 90)
+ * 평균 승률: 상대 플레이어 포켓몬 후보 하나하나와 1:1 로 붙었을 때 먼저 쓰러뜨리는 비율 (출현 가중치, 상대는 자속 위력 90)
  * table: builder.targetTable(...) — 내가 빠르면 내 타수 ≤ 상대 타수, 느리면 < 이면 이김
  */
 export function winRate(ctx, table) {
@@ -49,7 +49,7 @@ export function winRate(ctx, table) {
 }
 
 /**
- * 상대 타입별 대응: 이 맵 상대 후보 중 그 타입을 가진 포켓몬들에게 (가중 평균)
+ * 상대 타입별 대응: 상대 플레이어 포켓몬 후보 중 그 타입을 가진 포켓몬들에게 (가중 평균)
  * 공격 = 내 기술 중 가장 센 데미지 %, 받기 = 상대 자속 공격에 받는 %, 선공 비율
  * tables: [{ i, t: builder.targetTable(...) }]
  * @returns [{ type, n, list: [{ i, off(평균 %, 100 상한), ko(1타 비율), taken, fast, move(slug), score }] (공격 순), tank: { i, taken }, hole, danger }]
@@ -89,7 +89,7 @@ const GROUP_KO = {
 };
 
 /**
- * 멤버 운용법: 기술마다 할 일 (공격기 = 이 맵 상대 중 그 기술이 가장 센 비율 · 효과 굉장 타입, 변화기 = 역할),
+ * 멤버 운용법: 기술마다 할 일 (공격기 = 상대 플레이어 포켓몬 중 그 기술이 가장 센 비율 · 효과 굉장 타입, 변화기 = 역할),
  * 잘 잡는 타입(타입별 대응에서 1순위인 타입) · 조심할 타입(받는 배율 2배 이상) · 받아내는 타입(반감 이하)
  * groupOf(slug): 변화기 역할 묶음 (ui/setdesc.js moveGroup)
  */
